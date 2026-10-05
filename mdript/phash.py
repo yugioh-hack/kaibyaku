@@ -36,7 +36,7 @@ ART_BOXES = (ART_BOX_RATIO, ART_BOX_RATIO_LOWER)
 # 中央（SAMPLE 透かしの下）。上下の領域だけでは見分けがつかない
 # ウィジャ盤・死のメッセージ「E」「A」「T」「H」の判定にだけ使う。
 # 透かしごと取り込むので、通常のカードには使わない。
-CENTER_BOX_RATIO = (0.18, 0.38, 0.82, 0.50)
+CENTER_BOX_RATIO = (0.20, 0.40, 0.50, 0.50)
 
 BITS_PER_REGION = HASH_SIZE * HASH_SIZE          # 64
 HEX_PER_REGION = BITS_PER_REGION // 4            # 16
