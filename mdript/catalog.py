@@ -25,6 +25,11 @@ USER_NAMES = "card_names.json"
 CONFIG_FILE = "config.json"
 HASH_FORMAT = 2          # 1=64bit 1領域 / 2=128bit 2領域
 
+# 上下の領域だけでは見分けがつかないカード（ウィジャ盤・死のメッセージ「E」「A」「T」「H」）。
+# この5枚だけは、ハッシュの末尾に中央の領域（64bit）を足した 48 文字で持つ。
+SPECIAL_CIDS = frozenset({"5224", "5271", "5272", "5273", "5274"})
+HASH_HEX_CENTER = HASH_HEX + HEX_PER_REGION
+
 
 def app_dir() -> str:
     """アプリ本体（exe 化された場合はその展開先）のディレクトリ。"""
@@ -58,7 +63,7 @@ def _hex_list(value):
     """ハッシュの一覧として使える文字列だけを取り出す（壊れた・書き換えられたファイル対策）。"""
     if not isinstance(value, list):
         return []
-    return [h for h in value if isinstance(h, str) and len(h) == HASH_HEX
+    return [h for h in value if isinstance(h, str) and len(h) in (HASH_HEX, HASH_HEX_CENTER)
             and all(c in "0123456789abcdef" for c in h)]
 
 
@@ -82,6 +87,7 @@ class Catalog:
         self._ids = np.zeros(0, dtype=object)
         self._upper = np.zeros(0, dtype=np.uint64)   # 上側の領域（粗い照合用）
         self._lower = np.zeros(0, dtype=np.uint64)   # 下側の領域
+        self._center = {}                            # 行番号 -> 中央の領域（特別扱いのカードだけ）
         self.load()
 
     # ---------- 読み込み ----------
@@ -116,13 +122,17 @@ class Catalog:
 
     def _reindex(self):
         ids, upper, lower = [], [], []
+        self._center = {}
         for cid, hexes in self.hashes.items():
             for h in hexes:
                 try:
                     hi = int(h[:HEX_PER_REGION], 16)
-                    lo = int(h[HEX_PER_REGION:], 16)
+                    lo = int(h[HEX_PER_REGION:HASH_HEX], 16)
+                    mid = int(h[HASH_HEX:], 16) if len(h) == HASH_HEX_CENTER else None
                 except ValueError:
                     continue
+                if mid is not None and cid in SPECIAL_CIDS:
+                    self._center[len(ids)] = mid
                 ids.append(cid)
                 upper.append(hi)
                 lower.append(lo)
@@ -169,12 +179,15 @@ class Catalog:
             return info["n"]
         return f"cid_{cid}"
 
-    def rank(self, hex_hash, top=3, coarse=False):
+    def rank(self, hex_hash, top=3, coarse=False, center=None):
         """距離の近い順に [(距離, カードID), ...] を返す（同じカードは1件にまとめる）。
 
         coarse=True のときは上側の領域（64bit）だけで採点する。
         ビット数が多いほど切り出し位置のズレに弱いので、
         枠を探している間はこちらを使い、確定の判断は128bit全体で行う。
+
+        center は中央の領域のハッシュ（16文字）を返す関数。先頭がウィジャ盤・死のメッセージ
+        のどれかだったときだけ呼ばれ、この5枚の間の順位を中央の領域も足して決め直す。
         """
         if self._upper.size == 0:
             return []
@@ -185,6 +198,10 @@ class Catalog:
         limit = min(distances.size, 256)
         idx = np.argpartition(distances, limit - 1)[:limit]
         idx = idx[np.argsort(distances[idx], kind="stable")]
+        if center is not None and not coarse and self._ids[idx[0]] in SPECIAL_CIDS:
+            out = self._rank_special(idx, distances, center(), top)
+            if out:
+                return out
         out, seen = [], set()
         for i in idx:
             cid = self._ids[i]
@@ -195,6 +212,35 @@ class Catalog:
             if len(out) >= top:
                 break
         return out
+
+    def _rank_special(self, idx, distances, center_hex, top):
+        """ウィジャ盤・死のメッセージの間の順位を、中央の領域も足して決め直す。
+
+        「この5枚のどれか」かどうかは従来どおり上下128bitの距離で見る（確定の基準を変えない）。
+        どれになるかだけを192bitの距離で決め、2位との差（margin）も192bitの差にする。
+        """
+        c = np.uint64(int(center_hex, 16))
+        family = int(distances[idx[0]])              # 5枚のどれかとしての距離
+        totals, others = {}, []
+        seen = set()
+        for i in idx:
+            cid = self._ids[i]
+            if cid in SPECIAL_CIDS:
+                if int(i) in self._center:
+                    total = int(distances[i]) + int(_popcount(c ^ np.uint64(self._center[int(i)])))
+                else:
+                    # 中央を持たない古い追加ハッシュ。最悪値の側に寄せて比べる
+                    total = int(distances[i]) + 32
+                if cid not in totals or total < totals[cid]:
+                    totals[cid] = total
+            elif cid not in seen:
+                seen.add(cid)
+                others.append((int(distances[i]), cid))
+        ordered = sorted(totals.items(), key=lambda kv: kv[1])
+        best_total = ordered[0][1]
+        merged = [(family + (t - best_total), cid) for cid, t in ordered] + others
+        merged.sort(key=lambda x: x[0])
+        return merged[:top]
 
 
 if hasattr(np, "bitwise_count"):

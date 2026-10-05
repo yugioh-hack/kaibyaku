@@ -196,6 +196,7 @@ def update_hashes(hash_db, cids, progress=None, should_stop=None, label="カー�
     戻り値は (画像を取得できたカード数, 新しく増えたハッシュ数,
               失敗した cid のリスト, 見つかった収録パックIDの集合)。
     """
+    from .catalog import SPECIAL_CIDS
     from .phash import artwork_phash_hex
     op = _opener()
     done, new_hashes, failed, packs = 0, 0, [], set()
@@ -206,7 +207,8 @@ def update_hashes(hash_db, cids, progress=None, should_stop=None, label="カー�
         try:
             images, card_packs = fetch_card_page(cid, op)
             packs.update(card_packs)
-            hexes = [artwork_phash_hex(im) for im in images]
+            special = cid in SPECIAL_CIDS     # 中央の領域も持たせるカード
+            hexes = [artwork_phash_hex(im, with_center=special) for im in images]
             if hexes:
                 cur = hash_db.setdefault(cid, [])
                 for h in hexes:

@@ -252,6 +252,23 @@ class TestIdentify(unittest.TestCase):
         full = dict((c, d) for d, c in self.catalog.rank(flipped, top=6))
         self.assertEqual(full[cid], 64)          # 下側の64bitが効いている
 
+    def test_special_cards_are_told_apart_by_the_center_region(self):
+        """上下が同じでも、中央が違うウィジャ盤系は中央の距離で順位が決まる。通常のカードでは中央を見ない。"""
+        base = artwork_phash_hex(fake_card(seed=7))
+        center_a, center_b = "0" * 16, "f" * 16
+        self.catalog.hashes["5271"] = [base + center_a]
+        self.catalog.hashes["5272"] = [base + center_b]
+        self.catalog._reindex()
+        # 中央が B に近い（2bit違い）→ 5272、同じ上下なので 128bit の距離は 0 のまま
+        ranked = dict((c, d) for d, c in self.catalog.rank(
+            base, top=8, center=lambda: "fffffffffffffffc"))
+        self.assertEqual(ranked["5272"], 0)
+        self.assertEqual(ranked["5271"], 60)          # 5272 との差は 192bit の差
+        self.assertEqual(min(ranked, key=ranked.get), "5272")
+        # 先頭が通常のカードなら、中央のハッシュは計算されない
+        normal = self.catalog.hashes["1"][0]
+        self.catalog.rank(normal, top=2, center=lambda: self.fail("中央は不要"))
+
     def test_does_not_confirm_a_non_card_image(self):
         """カードではない画像を、確定として出力しないこと。"""
         from mdript.pipeline import CONFIRMED, Cropper, Options

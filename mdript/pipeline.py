@@ -15,7 +15,7 @@ from PIL import Image, ImageDraw
 from .catalog import Catalog
 from .layout import (COARSE_SCALES, COARSE_SHIFTS, CORNER_RADIUS_RATIO, ESTIMATED,
                      FINE_SCALES, FINE_SHIFTS, card_boxes, nudged_boxes)
-from .phash import artwork_phash_hex, hamming
+from .phash import artwork_phash_hex, center_phash_hex, hamming
 
 IMAGE_EXTS = (".png", ".jpg", ".jpeg", ".webp", ".bmp")
 
@@ -170,7 +170,8 @@ class Cropper:
         if card.size[0] < 40 or card.size[1] < 40:
             return None
         hex_hash = artwork_phash_hex(card, coarse=coarse)
-        ranked = self.catalog.rank(hex_hash, top=2, coarse=coarse)
+        ranked = self.catalog.rank(hex_hash, top=2, coarse=coarse,
+                                   center=lambda: center_phash_hex(card))
         if not ranked:
             return None
         diff, cid = ranked[0]

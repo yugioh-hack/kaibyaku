@@ -33,6 +33,11 @@ ART_BOX_RATIO = (0.18, 0.22, 0.82, 0.38)
 ART_BOX_RATIO_LOWER = (0.18, 0.50, 0.82, 0.62)
 ART_BOXES = (ART_BOX_RATIO, ART_BOX_RATIO_LOWER)
 
+# 中央（SAMPLE 透かしの下）。上下の領域だけでは見分けがつかない
+# ウィジャ盤・死のメッセージ「E」「A」「T」「H」の判定にだけ使う。
+# 透かしごと取り込むので、通常のカードには使わない。
+CENTER_BOX_RATIO = (0.18, 0.38, 0.82, 0.50)
+
 BITS_PER_REGION = HASH_SIZE * HASH_SIZE          # 64
 HEX_PER_REGION = BITS_PER_REGION // 4            # 16
 HASH_HEX = HEX_PER_REGION * len(ART_BOXES)       # 32
@@ -59,16 +64,26 @@ def crop_region(card_img: Image.Image, box) -> Image.Image:
     return card_img.crop((int(w * l), int(h * t), int(w * r), int(h * b)))
 
 
-def artwork_phash_hex(card_img: Image.Image, coarse: bool = False) -> str:
+def center_phash_hex(card_img: Image.Image) -> str:
+    """中央の領域だけのハッシュ（64bit / 16文字）。"""
+    return phash_hex(crop_region(card_img, CENTER_BOX_RATIO))
+
+
+def artwork_phash_hex(card_img: Image.Image, coarse: bool = False,
+                      with_center: bool = False) -> str:
     """カード画像から 128bit のハッシュ（32文字）を作る。
 
     coarse=True のときは上側の領域だけ（64bit / 16文字）を計算する。
     粗い照合では下側を使わないので、枠を探す間の計算を半分にできる。
+    with_center=True のときは末尾に中央の領域を足した 192bit（48文字）にする。
     """
     if card_img.mode != "RGB":
         card_img = card_img.convert("RGB")
     boxes = ART_BOXES[:1] if coarse else ART_BOXES
-    return "".join(phash_hex(crop_region(card_img, box)) for box in boxes)
+    hex_hash = "".join(phash_hex(crop_region(card_img, box)) for box in boxes)
+    if with_center and not coarse:
+        hex_hash += center_phash_hex(card_img)
+    return hex_hash
 
 
 def hamming(a: str, b: str) -> int:

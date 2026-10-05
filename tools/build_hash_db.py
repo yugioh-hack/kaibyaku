@@ -22,7 +22,8 @@ from concurrent.futures import ProcessPoolExecutor
 
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."))
 
-from mdript.phash import ART_BOXES, HASH_SIZE, artwork_phash_hex  # noqa: E402
+from mdript.catalog import SPECIAL_CIDS  # noqa: E402
+from mdript.phash import ART_BOXES, HASH_HEX, HASH_SIZE, artwork_phash_hex  # noqa: E402
 
 EXTS = (".jpg", ".jpeg", ".png", ".webp")
 _VARIANT = re.compile(r"(?:_alt\d+|_\d+| \(\d+\))+$")
@@ -43,7 +44,7 @@ def hash_one(path):
     try:
         from PIL import Image
         with Image.open(path) as im:
-            return os.path.basename(path), artwork_phash_hex(im)
+            return os.path.basename(path), artwork_phash_hex(im, with_center=True)   # 中央の領域つき（48文字）
     except Exception:
         return os.path.basename(path), None
 
@@ -117,6 +118,11 @@ def main():
         if not cid:
             unresolved.append(fname)
             continue
+        if cid in SPECIAL_CIDS:
+            if len(h) == HASH_HEX:
+                print(f"[警告] {fname}: 中央の領域が無いキャッシュです（キャッシュを作り直してください）")
+        else:
+            h = h[:HASH_HEX]             # 通常のカードは上下の2領域だけ
         hashes.setdefault(cid, [])
         if h not in hashes[cid]:
             hashes[cid].append(h)
