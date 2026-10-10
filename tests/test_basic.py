@@ -324,6 +324,51 @@ PACK_LIST_HTML = """
 """
 
 
+class TestRegress(unittest.TestCase):
+    """tools/regress.py の、基準値と比べる部分（画像は使わない）。"""
+
+    @classmethod
+    def setUpClass(cls):
+        sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "tools"))
+        import regress
+        cls.regress = regress
+
+    def _row(self, cid, status, top=None, own=10):
+        return {"file": f"{cid}.webp", "cid": cid, "status": status, "own": own,
+                "distance": own, "margin": 20, "top": top or cid, "hash": "0" * HASH_HEX}
+
+    def test_wrong_confirmation_fails_even_without_a_baseline(self):
+        r = self.regress
+        now = r.summarize_crops([self._row("1", r.CONFIRMED), self._row("2", r.WRONG, top="3")])
+        self.assertEqual(now["status"][r.WRONG], 1)
+        self.assertEqual(now["top1_wrong"], 1)
+        self.assertEqual(len(r.compare_crops(now, None)), 1)
+
+    def test_only_newly_unconfirmed_cards_fail(self):
+        r = self.regress
+        base = r.summarize_crops([self._row("1", r.CONFIRMED), self._row("2", r.REVIEW)])
+        same = r.summarize_crops([self._row("1", r.CONFIRMED), self._row("2", r.REVIEW)])
+        self.assertEqual(r.compare_crops(same, base), [])
+        worse = r.summarize_crops([self._row("1", r.NOT_CARD), self._row("2", r.CONFIRMED)])
+        problems = r.compare_crops(worse, base)
+        self.assertEqual(len(problems), 1)
+        self.assertIn("1", problems[0])
+
+    def test_screenshot_rate_has_a_tolerance(self):
+        r = self.regress
+
+        def shots(confirmed, wrong=0):
+            row = {s: 0 for s in r.STATUSES}
+            row[r.CONFIRMED], row[r.WRONG] = confirmed, wrong
+            row[r.REVIEW] = 300 - confirmed - wrong
+            return {"sample": 300, "conditions": {"原本": row}}
+
+        self.assertEqual(r.compare_screenshots(shots(298), shots(300)), [])      # 0.7 ポイント
+        self.assertEqual(len(r.compare_screenshots(shots(290), shots(300))), 1)
+        self.assertEqual(len(r.compare_screenshots(shots(299, wrong=1), shots(300))), 1)
+        self.assertEqual(r.compare_screenshots(shots(290), None), [])
+
+
 class FakeCatalog:
     """通信テスト用の最小限のカタログ。"""
 
