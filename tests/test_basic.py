@@ -209,6 +209,31 @@ class TestIdentify(unittest.TestCase):
             self.assertEqual(result.name, "テストカード")
             self.assertTrue(os.path.exists(result.saved_path))
 
+    def test_add_hash_teaches_a_card_with_a_different_crop(self):
+        """マスター画像と描画が違うカードも、MD 版のハッシュを足せば確定する。"""
+        from mdript.pipeline import Cropper
+        mine = artwork_phash_hex(fake_card(seed=99))         # カタログの 1 番とは別物の描画
+        self.assertFalse(self.catalog.add_hash("999", mine))   # 知らないカードIDには足さない
+        self.assertTrue(self.catalog.add_hash("1", mine))
+        self.assertFalse(self.catalog.add_hash("1", mine))     # 同じものは重ねない
+        found = Cropper(self.catalog).identify(fake_screenshot(seed=99))
+        self.assertEqual(found["card_id"], "1")
+        self.assertEqual(found["distance"], 0)
+
+    def test_learn_adds_the_hash_of_the_trusted_box(self):
+        """--learn は、推測した枠ではなくマスター画像と同じ画角の枠のハッシュを足す。"""
+        import contextlib
+        from mdript.cli import learn
+        self.catalog.save_user_hashes = lambda: None
+        shot = fake_screenshot(seed=99)
+        with tempfile.TemporaryDirectory() as tmp:
+            path = os.path.join(tmp, "shot.png")
+            shot.save(path)
+            with contextlib.redirect_stdout(io.StringIO()):
+                self.assertEqual(learn(self.catalog, "1", path), 0)
+        box = predict_card_box(shot.size)
+        self.assertEqual(self.catalog.hashes["1"][-1], artwork_phash_hex(shot.crop(box)))
+
     def test_both_format_does_not_overwrite_an_existing_png(self):
         from mdript.pipeline import Cropper, Options
         with tempfile.TemporaryDirectory() as tmp:

@@ -6,6 +6,7 @@ import argparse
 import sys
 
 from .catalog import Catalog
+from .layout import TRUSTED, card_boxes
 from .pipeline import CONFIRMED, ERROR, NOT_CARD, REVIEW, Cropper, Options
 
 
@@ -49,7 +50,42 @@ def build_parser():
                    help="公式データベースからカード名を取得する")
     p.add_argument("--update-hashes", action="store_true",
                    help="新しいカードセット（新カード＋そのパックの再録カード）を取り込む")
+    p.add_argument("--learn", metavar="カードID",
+                   help="指定した画像1枚を、このカードIDの照合用ハッシュとして追加する"
+                        "（マスター画像と切り方が違い、カードなしになってしまうカード向け）")
     return p
+
+
+def learn(catalog, cid, path):
+    """画像1枚（カードの拡大画面）のハッシュを、カードIDの照合用に追加して保存する。"""
+    from PIL import Image
+
+    cid = str(cid)
+    if cid not in catalog.hashes:
+        print(f"カードID {cid} は照合用データにありません", file=sys.stderr)
+        return 1
+    cropper = Cropper(catalog, Options())
+    with Image.open(path) as raw:
+        img = raw.convert("RGB")
+    # マスター画像と同じ画角の枠（trusted）だけを使う。画像から推測した枠で取ったハッシュは
+    # 少しずれた切り出しになり、足しても他の画像に当たらない
+    found = next((f for origin, box in card_boxes(img, cropper.options.resolution)
+                  if origin == TRUSTED and (f := cropper._evaluate(img, box, origin))), None)
+    if not found:
+        print("カードの位置を決められませんでした（カードの拡大画面を全画面で撮った画像を使ってください）",
+              file=sys.stderr)
+        return 1
+    print(f"{catalog.display_name(cid)}（{cid}）  現在の照合: "
+          f"{catalog.display_name(found['card_id'])}（{found['card_id']}）距離 {found['distance']}")
+    if found["card_id"] == cid and Cropper.is_confirmed(found):
+        print("すでに確定できるので、追加しません")
+        return 0
+    if not catalog.add_hash(cid, found["hash"]):
+        print("近いハッシュがすでにあるので、追加しません")
+        return 0
+    catalog.save_user_hashes()
+    print("照合用ハッシュを追加しました")
+    return 0
 
 
 def main(argv=None):
@@ -58,6 +94,12 @@ def main(argv=None):
         if stream is not None and hasattr(stream, "reconfigure"):
             stream.reconfigure(errors="replace")
     args = build_parser().parse_args(argv)
+
+    if args.learn:
+        if len(args.paths) != 1:
+            print("--learn には画像を1枚だけ指定してください", file=sys.stderr)
+            return 2
+        return learn(Catalog(), args.learn, args.paths[0])
 
     if args.gui or (not args.paths and not args.update_names and not args.update_hashes):
         from .gui import main as gui_main

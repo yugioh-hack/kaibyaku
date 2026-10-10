@@ -140,6 +140,23 @@ class Catalog:
         self._upper = np.array(upper, dtype=np.uint64)
         self._lower = np.array(lower, dtype=np.uint64)
 
+    def add_hash(self, cid, hex_hash, min_distance=1):
+        """カードに照合用のハッシュを1つ足す。足したら True。
+
+        マスター画像と MD の描画でイラストの切り方が違うカード向け。
+        すでに近いハッシュ（距離 min_distance 未満）があるときは足さない。
+        保存は save_user_hashes() で行う。
+        """
+        cid = str(cid)
+        if cid not in self.hashes or len(hex_hash) != HASH_HEX:
+            return False
+        if any(len(h) >= HASH_HEX and bin(int(h[:HASH_HEX], 16) ^ int(hex_hash, 16)).count("1") < min_distance
+               for h in self.hashes[cid]):
+            return False
+        self.hashes[cid].append(hex_hash)
+        self._reindex()
+        return True
+
     # ---------- 保存 ----------
     def save_user_hashes(self):
         bundled = _read_json(os.path.join(bundled_data_dir(), BUNDLED_HASHES)) or {}
