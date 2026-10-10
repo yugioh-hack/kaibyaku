@@ -14,8 +14,8 @@ from PIL import Image
 
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."))
 
-from mdript.layout import (CARD_ASPECT, REF_CARD_BOX, detect_card_box,  # noqa: E402
-                               nudged_boxes, predict_card_box)
+from mdript.layout import (CARD_ASPECT, REF_CARD_BOX, box_is_on_card_edges,  # noqa: E402
+                               detect_card_box, nudged_boxes, predict_card_box)
 from mdript.phash import (ART_BOXES, HASH_HEX, HEX_PER_REGION,  # noqa: E402
                               artwork_phash_hex, crop_region, hamming, phash_hex)
 from mdript.pipeline import collect_images, rounded_alpha, safe_filename  # noqa: E402
@@ -66,6 +66,17 @@ class TestLayout(unittest.TestCase):
 
     def test_detection_ignores_tiny_images(self):
         self.assertIsNone(detect_card_box(Image.new("RGB", (1, 300))))
+
+    def test_predicted_box_is_on_the_card_edges(self):
+        for size in ((2560, 1440), (1920, 1080), (1280, 720)):
+            shot = fake_screenshot(size)
+            self.assertTrue(box_is_on_card_edges(shot, predict_card_box(size)), size)
+
+    def test_title_bar_moves_the_card_off_the_predicted_box(self):
+        """タイトルバーごと撮ったウィンドウの画像では、解像度から決めた枠がカードからずれる。"""
+        window = Image.new("RGB", (1600, 932), (32, 32, 32))
+        window.paste(fake_screenshot((1600, 900)), (0, 32))
+        self.assertFalse(box_is_on_card_edges(window, predict_card_box(window.size)))
 
     def test_nudged_boxes_stay_inside(self):
         for box in nudged_boxes((100, 100, 400, 537), (1920, 1080)):
@@ -267,6 +278,23 @@ class TestIdentify(unittest.TestCase):
             found = cropper.identify(fake_screenshot(size, seed=2))
             self.assertIsNotNone(found, size)
             self.assertEqual(found["card_id"], "3", size)
+
+    def test_loose_match_off_the_card_is_not_trusted(self):
+        """枠がカードに合っていないのに、ゆるい条件で別のカードに当たっても確定しない。"""
+        from mdript.layout import ESTIMATED, TRUSTED
+        from mdript.pipeline import CONFIRM_DIFF, Cropper
+        window = Image.new("RGB", (1600, 932), (32, 32, 32))
+        window.paste(fake_screenshot((1600, 900)), (0, 32))
+        loose = {"origin": TRUSTED, "distance": CONFIRM_DIFF + 16, "margin": 8,
+                 "box": predict_card_box(window.size)}
+        self.assertTrue(Cropper._is_off_the_card(window, loose))
+        self.assertFalse(Cropper._is_off_the_card(window, dict(loose, distance=CONFIRM_DIFF)))
+        self.assertFalse(Cropper._is_off_the_card(window, dict(loose, origin=ESTIMATED)))
+        shot = fake_screenshot((1600, 900))
+        self.assertFalse(Cropper._is_off_the_card(
+            shot, dict(loose, box=predict_card_box(shot.size))))
+        card = fake_card()
+        self.assertFalse(Cropper._is_off_the_card(card, dict(loose, box=(0, 0) + card.size)))
 
     def test_coarse_ranking_uses_only_the_upper_region(self):
         """下側だけ全ビット違うハッシュは、粗い照合では距離0になる。"""

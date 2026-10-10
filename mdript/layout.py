@@ -110,6 +110,46 @@ def detect_card_box(img: Image.Image, work_width=640, aspect_tol=ASPECT_TOLERANC
             int(round((right + 1) * w / sw)), int(round((bottom + 1) * h / sh)))
 
 
+# 枠がカードの縁に乗っているかを見るときの幅（カードの高さに対する比率）
+EDGE_SEARCH_RATIO = 0.06       # この範囲でいちばん強い輪郭と比べる
+EDGE_TOLERANCE_RATIO = 0.004   # 枠の辺からこの範囲に輪郭があればよい
+EDGE_STRENGTH = 0.3
+EDGE_SIDES = 3                 # 4辺のうち、輪郭が要る辺の数
+
+
+def box_is_on_card_edges(img: Image.Image, box):
+    """枠の各辺が、カードの縁（輪郭）に乗っているか。
+
+    解像度から推定した枠は、全画面のスクショでは縁にぴったり乗る。タイトルバーごと撮った
+    ウィンドウモードの画像では数%ずれて、辺の位置に輪郭が無くなる。
+    各辺について、辺のすぐ近くの輪郭の強さを、その周りでいちばん強い輪郭と比べる。
+    実測では、全画面（原本・縮小・JPEG）は4辺とも 0.39 以上、ずれた枠は3辺が 0.1 以下だった。
+    """
+    left, top, right, bottom = box
+    width, height = right - left, bottom - top
+    if width < 16 or height < 16:
+        return False
+    reach = max(3, int(round(height * EDGE_SEARCH_RATIO)))
+    near = max(2, int(round(height * EDGE_TOLERANCE_RATIO)))
+    # 角丸や隣の辺の影響を避けるため、辺の中ほど8割だけを見る
+    inner_x = (left + width // 10, right - width // 10)
+    inner_y = (top + height // 10, bottom - height // 10)
+    sides = 0
+    for vertical, edge in ((True, left), (True, right), (False, top), (False, bottom)):
+        # 辺をまたぐ細い帯だけを取り出し、辺に直交する向きの輪郭の強さを並べる
+        limit = img.size[0] if vertical else img.size[1]
+        start, stop = max(0, edge - 1 - reach), min(limit, edge + reach + 1)
+        strip = ((start, inner_y[0], stop, inner_y[1]) if vertical
+                 else (inner_x[0], start, inner_x[1], stop))
+        gray = np.asarray(img.crop(strip).convert("L"), dtype=np.float32)
+        profile = np.abs(np.diff(gray, axis=1 if vertical else 0)).sum(axis=0 if vertical else 1)
+        pos = edge - 1 - start
+        close = profile[max(0, pos - near):pos + near + 1]
+        if close.size and profile.max() > 0 and close.max() >= profile.max() * EDGE_STRENGTH:
+            sides += 1
+    return sides >= EDGE_SIDES
+
+
 def card_boxes(img: Image.Image, mode="auto"):
     """試す順に候補の枠を返す。
 

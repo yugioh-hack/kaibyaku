@@ -14,7 +14,8 @@ from PIL import Image, ImageDraw
 
 from .catalog import Catalog
 from .layout import (COARSE_SCALES, COARSE_SHIFTS, CORNER_RADIUS_RATIO, ESTIMATED,
-                     FINE_SCALES, FINE_SHIFTS, card_boxes, nudged_boxes)
+                     FINE_SCALES, FINE_SHIFTS, TRUSTED, box_is_on_card_edges, card_boxes,
+                     nudged_boxes)
 from .phash import artwork_phash_hex, center_phash_hex, hamming
 
 IMAGE_EXTS = (".png", ".jpg", ".jpeg", ".webp", ".bmp")
@@ -201,7 +202,10 @@ class Cropper:
         for origin, box in card_boxes(img, self.options.resolution):
             if origin == ESTIMATED:
                 detected_box = box
-            best = self._better(self._evaluate(img, box, origin), best)
+            cand = self._evaluate(img, box, origin)
+            if cand and self._is_off_the_card(img, cand):
+                cand["origin"] = ESTIMATED
+            best = self._better(cand, best)
             if best and self.is_confirmed(best):
                 return best
         if best is None or self.options.resolution != "auto":
@@ -230,6 +234,22 @@ class Cropper:
         if found is not None:
             best = self._better(self._evaluate(img, found["box"], ESTIMATED), best)
         return best
+
+    @classmethod
+    def _is_off_the_card(cls, img, found):
+        """解像度から決めた枠が、実際にはカードに合っていないか。
+
+        タイトルバーごと撮ったウィンドウモードの画像では、解像度から決めた枠が数%ずれる。
+        ずれた切り出しでも、偶然ほかのカードに距離32・差8まで近づいた例があり、
+        ゆるいほうの条件で確定して別の名前で保存された。
+        そこで、ゆるいほうの条件でしか確定できないときだけ、枠がカードの縁に乗っているかを
+        確かめる。乗っていなければ推定枠と同じ扱いにして、検出と追い込み探索に回す。
+        """
+        if found.get("origin") != TRUSTED or found["distance"] <= CONFIRM_DIFF:
+            return False
+        if found["box"] == (0, 0) + img.size:       # 切り抜き済みの画像には外側が無い
+            return False
+        return cls.is_confirmed(found) and not box_is_on_card_edges(img, found["box"])
 
     @staticmethod
     def is_confirmed(found):
