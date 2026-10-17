@@ -522,6 +522,30 @@ class TestBuildHashDb(unittest.TestCase):
         self.assertEqual(len(hashes["23514"]), 1)            # JSON に無くても画像があれば入れる
         self.assertEqual(len(hashes["23513"][0]), HASH_HEX)
 
+    def test_english_image_is_added_only_when_far_from_existing_hash(self):
+        import json
+        from unittest import mock
+        from mdript.phash import artwork_phash_hex
+        same, other = fake_card(seed=1), fake_card(seed=2)
+        with tempfile.TemporaryDirectory() as tmp:
+            en_dir = os.path.join(tmp, "master_images_en")
+            os.makedirs(en_dir)
+            same.save(os.path.join(en_dir, "100.jpg"))         # 既存と同じ絵
+            other.save(os.path.join(en_dir, "200.jpg"))        # 既存と違う絵（描き変えられたカード）
+            base = os.path.join(tmp, "base.json")
+            with open(base, "w", encoding="utf-8") as f:
+                json.dump({"meta": {"art_boxes": [list(b) for b in ART_BOXES], "hash_size": 8},
+                           "hashes": {"100": [artwork_phash_hex(same)], "200": [artwork_phash_hex(same)]}}, f)
+            out = os.path.join(tmp, "out.json")
+            argv = ["build_hash_db.py", "--base", base, "--master-dir-en", en_dir,
+                    "--out", out, "--workers", "1"]
+            with mock.patch.object(sys, "argv", argv), mock.patch("builtins.print"):
+                self.build.main()
+            with open(out, encoding="utf-8") as f:
+                hashes = json.load(f)["hashes"]
+        self.assertEqual(len(hashes["100"]), 1)              # ほとんど同じ絵は足さない
+        self.assertEqual(len(hashes["200"]), 2)              # 離れた絵は足す
+
 
 class FakeCatalog:
     """通信テスト用の最小限のカタログ。"""

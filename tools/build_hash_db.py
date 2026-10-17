@@ -24,6 +24,7 @@
                                   --master-dir-en ... --card-json-en ...
 """
 import argparse
+import collections
 import json
 import os
 import re
@@ -34,7 +35,9 @@ from concurrent.futures import ProcessPoolExecutor
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."))
 
 from mdript.catalog import SPECIAL_CIDS  # noqa: E402
-from mdript.phash import ART_BOXES, HASH_HEX, HASH_SIZE, artwork_phash_hex  # noqa: E402
+from mdript.phash import ART_BOXES, HASH_HEX, HASH_SIZE, artwork_phash_hex, hamming  # noqa: E402
+
+EN_MIN_DISTANCE = 12   # 英語版の画像を既存のハッシュに足す、最小の距離（実測で決めた値。README 参照）
 
 EXTS = (".jpg", ".jpeg", ".png", ".webp")
 _VARIANT = re.compile(r"(?:_alt\d+|_\d+| \(\d+\))+$")
@@ -106,6 +109,8 @@ def main():
     ap.add_argument("--master-dir-en", help="英語版だけのカードの画像のフォルダ（ファイル名がカードID）")
     ap.add_argument("--card-json-en",
                     help="英語版だけのカードのJSON（yugioh_cards_en_only.json）。画像の抜けの確認に使う")
+    ap.add_argument("--en-min-distance", type=int, default=EN_MIN_DISTANCE,
+                    help="英語版の画像を、同じカードの既存のハッシュに足す最小の距離（これ未満は足さない）")
     ap.add_argument("--base", help="このハッシュDBに足す（入っているハッシュは消さない）")
     ap.add_argument("--out", default="data/card_hashes.json")
     ap.add_argument("--workers", type=int, default=0)
@@ -178,28 +183,39 @@ def main():
 
     if args.master_dir_en:
         # ファイル名がカードIDなので、名前の対応表を通さない
-        # （キャッシュはファイル名で引くので、日本語版の画像と混ぜないよう使わない。数十枚なのですぐ終わる）
+        # （キャッシュはファイル名で引くので、日本語版の画像と混ぜないよう使わない）
         files = list_images(args.master_dir_en)
-        print(f"英語版だけのカードの画像: {len(files)} 枚")
-        en_cids = set()
-        for fname, h in sorted(hash_files(files, workers).items()):
+        print(f"英語版の画像: {len(files)} 枚")
+        en_cids, skipped, added_ja, dists = set(), 0, 0, []
+        for fname, h in sorted(hash_files(files, workers).items(), key=lambda kv: (stem_to_cid(kv[0]) or "", kv[0])):
             cid = stem_to_cid(fname)
-            if cid:
-                add(cid, fname, h)
-                en_cids.add(cid)
-            else:
+            if not cid:
                 unresolved.append(fname)
-        print(f"英語版だけのカード: {len(en_cids)} 種")
+                continue
+            if cid in hashes:
+                # すでにあるカード（日本語版の画像など）は、ほとんど同じ絵のハッシュでDBを膨らませない。
+                # 規制で描き変えられた絵のように、既存のどれからも離れているものだけ足す
+                d = min(hamming(h[:HASH_HEX], x[:HASH_HEX]) for x in hashes[cid])
+                dists.append(d)
+                if d < args.en_min_distance:
+                    skipped += 1
+                    continue
+                added_ja += 1
+                print(f"  描き変え候補: {fname} 既存との距離 {d}")
+            add(cid, fname, h)
+            en_cids.add(cid)
+        print(f"英語版の画像から追加したカード: {len(en_cids)} 種（うち既存のカードに別の絵を足したもの {added_ja} 種のハッシュ）、"
+              f"既存と近いので足さなかった画像 {skipped} 枚")
+        if dists:
+            hist = collections.Counter(min(d // 4 * 4, 40) for d in dists)
+            print("  既存のカードとの距離の分布: " + " ".join(
+                f"{lo}-{lo + 3 if lo < 40 else '以上'}:{hist[lo]}" for lo in sorted(hist)))
         if args.card_json_en:
             with open(args.card_json_en, encoding="utf-8") as f:
                 listed = {str(c.get("id")) for c in json.load(f) if c.get("id")}
-            lacking = sorted(listed - en_cids, key=int)
+            lacking = sorted(listed - {stem_to_cid(os.path.basename(p)) for p in files}, key=int)
             if lacking:
                 print(f"[警告] 画像の無い英語版だけのカード {len(lacking)} 件（例: {lacking[:5]}）")
-            moved = len(en_cids - listed)
-            if moved:
-                # 日本語版でも出て JSON から外れたカード。カードIDは同じなので照合にはそのまま使える
-                print(f"  （うち {moved} 種は日本語版にも入ったカード）")
 
     out = {
         "meta": {
