@@ -7,7 +7,8 @@ import sys
 
 from .catalog import Catalog
 from .layout import TRUSTED, card_boxes
-from .pipeline import CONFIRMED, ENGLISH_MODES, ERROR, NOT_CARD, REVIEW, Cropper, Options
+from .pipeline import (CONFIRMED, ENGLISH_MODES, ERROR, LANGUAGE_SPLITS, NOT_CARD, REVIEW,
+                       Cropper, Options)
 
 
 def _resolution(text):
@@ -45,9 +46,12 @@ def build_parser():
                    help="カードと判定できなかった画像を保存しない")
     p.add_argument("--resolution", type=_resolution, default="auto",
                    help="auto / fixed / 1920x1080 のように元の解像度を指定")
-    p.add_argument("--english", choices=ENGLISH_MODES, default="off",
-                   help="英語クライアントのスクショの扱い。name: 英語名で保存 / "
-                        "folder: en/ に分ける / both: 英語名で en/ に分ける（既定: off）")
+    p.add_argument("--english", choices=ENGLISH_MODES, default="name",
+                   help="英語クライアントのスクショの名前。name: 英語名（既定）/ ja: 日本語名 / "
+                        "off: 英語版を判別しない。日本語版と同じフォルダで名前が重なるときは _en を付ける")
+    p.add_argument("--split", choices=LANGUAGE_SPLITS, default="none",
+                   help="言語ごとのフォルダ分け。none: 分けない（既定）/ en: 英語版だけ en/ に / "
+                        "both: 日本語版は ja/、英語版は en/ に")
     p.add_argument("--gui", action="store_true", help="GUI を開く")
     p.add_argument("--update-names", action="store_true",
                    help="公式データベースからカード名を取得する")
@@ -148,6 +152,7 @@ def main(argv=None):
         save_review=not args.no_review,
         save_not_card=not args.no_not_card,
         english=args.english,
+        split=args.split,
     )
     cropper = Cropper(catalog, options)
 

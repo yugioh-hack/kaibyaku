@@ -263,7 +263,7 @@ class TestIdentify(unittest.TestCase):
             self.assertEqual(result.name, "テストカード")
             self.assertTrue(os.path.exists(result.saved_path))
 
-    def _process_english(self, mode, vertical=True):
+    def _process_english(self, mode, split="none", vertical=True):
         from mdript.pipeline import Cropper, Options
         shot = fake_screenshot(seed=0)
         shot = draw_text_strokes(shot, predict_card_box(shot.size), vertical=vertical)
@@ -271,37 +271,74 @@ class TestIdentify(unittest.TestCase):
             source = os.path.join(tmp, "shot.png")
             shot.save(source)
             out = os.path.join(tmp, "out")
-            result = Cropper(self.catalog, Options(output_dir=out, write_csv=False,
-                                                   english=mode)).process_file(source)
+            result = Cropper(self.catalog, Options(output_dir=out, write_csv=False, english=mode,
+                                                   split=split)).process_file(source)
             saved = os.path.relpath(result.saved_path, out) if result.saved_path else ""
         return result, saved
 
-    def test_english_screenshot_is_saved_by_the_mode(self):
+    def test_english_screenshot_is_saved_by_name_and_split(self):
         from mdript.pipeline import CONFIRMED, ENGLISH_NOTE
         self.catalog.names["1"]["e"] = "Test Card"
-        result, saved = self._process_english("both")
+        result, saved = self._process_english("name")
         self.assertEqual(result.status, CONFIRMED)
         self.assertTrue(result.english)
         self.assertEqual(result.note, ENGLISH_NOTE)
-        self.assertEqual(saved, os.path.join("en", "Test Card.webp"))
-        self.assertEqual(self._process_english("name")[1], "Test Card.webp")
-        self.assertEqual(self._process_english("folder")[1], os.path.join("en", "テストカード.webp"))
-        result, saved = self._process_english("off")
-        self.assertFalse(result.english)
-        self.assertEqual(saved, "テストカード.webp")
+        self.assertEqual(saved, "Test Card.webp")
+        en = os.path.join("en", "{}")
+        cases = {("name", "en"): en.format("Test Card.webp"),
+                 ("name", "both"): en.format("Test Card.webp"),
+                 ("ja", "none"): "テストカード_en.webp",       # 日本語版と同じ場所なので _en を付ける
+                 ("ja", "en"): en.format("テストカード.webp"),
+                 ("ja", "both"): en.format("テストカード.webp"),
+                 ("off", "both"): "テストカード.webp"}          # 判別しないときは分けない
+        for (mode, split), want in cases.items():
+            self.assertEqual(self._process_english(mode, split)[1], want, (mode, split))
 
-    def test_japanese_screenshot_keeps_the_japanese_name(self):
+    def test_japanese_screenshot_goes_to_ja_only_when_splitting_both(self):
         self.catalog.names["1"]["e"] = "Test Card"
-        result, saved = self._process_english("both", vertical=False)
+        result, saved = self._process_english("name", "en", vertical=False)
         self.assertFalse(result.english)
         self.assertEqual(saved, "テストカード.webp")
+        self.assertEqual(self._process_english("name", "both", vertical=False)[1],
+                         os.path.join("ja", "テストカード.webp"))
+
+    def test_english_name_same_as_japanese_gets_a_suffix(self):
+        self.catalog.names["1"]["e"] = "テストカード"          # Sin Tune のように日英で同じ名前
+        self.assertEqual(self._process_english("name")[1], "テストカード_en.webp")
+        self.assertEqual(self._process_english("name", "en")[1],
+                         os.path.join("en", "テストカード.webp"))
 
     def test_english_name_falls_back_when_not_fetched(self):
         from mdript.pipeline import NO_ENGLISH_NAME_NOTE
         result, saved = self._process_english("name")
         self.assertTrue(result.english)
         self.assertEqual(result.note, NO_ENGLISH_NAME_NOTE)
-        self.assertEqual(saved, "テストカード.webp")
+        self.assertEqual(saved, "テストカード_en.webp")        # 日本語版と同じ名前にしない
+        self.assertEqual(self._process_english("name", "en")[1],
+                         os.path.join("en", "テストカード.webp"))
+
+    def test_mixed_japanese_and_english_screenshots_are_both_saved(self):
+        """同じカードの日本語版と英語版を一緒に処理しても、英語版が重複として飛ばされない。"""
+        from mdript.pipeline import Cropper, Options
+        shot = fake_screenshot(seed=0)
+        box = predict_card_box(shot.size)
+        with tempfile.TemporaryDirectory() as tmp:
+            src = os.path.join(tmp, "in")
+            os.makedirs(src)
+            draw_text_strokes(shot, box, vertical=False).save(os.path.join(src, "ja.png"))
+            draw_text_strokes(shot, box, vertical=True).save(os.path.join(src, "en.png"))
+            want = {("name", "none"): ["テストカード.webp", "テストカード_en.webp"],
+                    ("ja", "none"): ["テストカード.webp", "テストカード_en.webp"],
+                    ("name", "both"): [os.path.join("en", "テストカード.webp"),
+                                       os.path.join("ja", "テストカード.webp")]}
+            for (mode, split), files in want.items():
+                out = os.path.join(tmp, f"out_{mode}_{split}")
+                summary = Cropper(self.catalog, Options(output_dir=out, write_csv=False,
+                                                        english=mode, split=split)).process([src])
+                self.assertEqual(summary.skipped, 0)
+                self.assertEqual(sorted(r.english for r in summary.results), [False, True])
+                self.assertEqual(sorted(os.path.relpath(r.saved_path, out)
+                                        for r in summary.results), files)
 
     def test_add_hash_teaches_a_card_with_a_different_crop(self):
         """マスター画像と描画が違うカードも、MD 版のハッシュを足せば確定する。"""

@@ -39,9 +39,16 @@ DUPLICATE_DIFF = 10       # 同じ場所にある同名ファイルとの重複�
 SKIPPED_NOTE = "同じイラストがすでにあるのでスキップ"
 ENGLISH_NOTE = "英語版"
 NO_ENGLISH_NAME_NOTE = "英語版（英語名が未取得のため日本語名で保存）"
+ENGLISH_SUFFIX = "_en"
 
-# 英語版（英語クライアントのスクショ）の扱い。英語名にするか、en/ に分けるか
-ENGLISH_MODES = ("off", "name", "folder", "both")
+# 英語版（英語クライアントのスクショ）の名前。
+#   name … 英語名（未取得なら日本語名）/ ja … 日本語名 / off … 英語版かどうかを見ない
+ENGLISH_MODES = ("name", "ja", "off")
+# 言語ごとのフォルダ分け。
+#   none … 分けない / en … 英語版だけ en/ に / both … 日本語版は ja/、英語版は en/ に
+LANGUAGE_SPLITS = ("none", "en", "both")
+# 日本語版と同じフォルダに同じ名前で保存することになるときは、英語版に _en を付ける。
+# 「同じイラストは保存しない」で、英語版が日本語版の重複として飛ばされないようにするため。
 _EXTS_BY_FORMAT = {"webp": (".webp",), "png": (".png",), "both": (".webp", ".png")}
 
 CONFIRMED = "確定"
@@ -65,8 +72,10 @@ class Options:
     recursive: bool = True
     write_csv: bool = True
     workers: int = 0                   # 0 で自動
-    english: str = "off"               # off / name（英語名）/ folder（en/ に分ける）/ both
+    english: str = "name"              # ENGLISH_MODES のどれか
+    split: str = "none"                # LANGUAGE_SPLITS のどれか
     english_subdir: str = "en"
+    japanese_subdir: str = "ja"
 
 
 @dataclass
@@ -329,10 +338,10 @@ class Cropper:
 
             diff, margin = found["distance"], found["margin"]
             cid = found["card_id"]
-            english, note = (self._english(found, cid) if diff <= REVIEW_DIFF
-                             else (False, ""))
-            name = self.catalog.display_name(
-                cid, english=english and self.options.english in ("name", "both"))
+            english, name, note = False, self.catalog.display_name(cid), ""
+            if diff <= REVIEW_DIFF and self._is_english(found):
+                english = True
+                name, note = self._english_name(cid)
 
             if self.is_confirmed(found):
                 status, target = CONFIRMED, self.options.output_dir
@@ -357,23 +366,39 @@ class Cropper:
                               saved_path=saved or "",
                               note=note or "カードの拡大画面ではないようです")
 
-            if english and self.options.english in ("folder", "both"):
-                target = os.path.join(target, self.options.english_subdir)
+            target = self._language_dir(target, english)
             saved, skipped = self._save(found["card"], target, name, found["hash"])
             return Result(path, status, cid, name, diff, margin, saved or "",
                           skipped or note, english)
         except Exception as exc:
             return Result(path, ERROR, note=f"{type(exc).__name__}: {exc}")
 
-    def _english(self, found, cid):
-        """英語版として扱うかと、そのときの備考を返す。"""
-        if self.options.english not in ("name", "folder", "both"):
-            return False, ""
-        if not is_english(found["card"]):
-            return False, ""
-        if self.options.english in ("name", "both") and not self.catalog.has_english_name(cid):
-            return True, NO_ENGLISH_NAME_NOTE
-        return True, ENGLISH_NOTE
+    def _is_english(self, found):
+        return self.options.english != "off" and is_english(found["card"])
+
+    def _english_name(self, cid):
+        """英語版を保存するときのカード名と備考。"""
+        japanese = self.catalog.display_name(cid)
+        name, note = japanese, ENGLISH_NOTE
+        if self.options.english == "name":
+            if self.catalog.has_english_name(cid):
+                name = self.catalog.display_name(cid, english=True)
+            else:
+                note = NO_ENGLISH_NAME_NOTE
+        # 英語名が日本語名と同じカード（Sin Tune など）もここで _en が付く
+        if self.options.split == "none" and name == japanese:
+            name += ENGLISH_SUFFIX
+        return name, note
+
+    def _language_dir(self, target, english):
+        """言語ごとのフォルダ分けをした保存先。英語版を判別しないときは分けない。"""
+        if self.options.english == "off":
+            return target
+        if english and self.options.split in ("en", "both"):
+            return os.path.join(target, self.options.english_subdir)
+        if not english and self.options.split == "both":
+            return os.path.join(target, self.options.japanese_subdir)
+        return target
 
     # ---------- まとめて処理 ----------
     def process(self, paths, on_result=None, should_stop=None):

@@ -27,13 +27,22 @@ try:                                     # ドラッグ＆ドロップ（無く�
 except Exception:                        # pragma: no cover
     DND_FILES, TkinterDnD, _DND = None, None, False
 
-# 英語版（英語クライアントのスクショ）の扱い。画面の表示 -> Options.english
+# 英語版（英語クライアントのスクショ）の名前。画面の表示 -> Options.english
 ENGLISH_CHOICES = {
-    "判別しない": "off",
     "英語名で保存": "name",
-    "en に分ける": "folder",
-    "英語名で en に分ける": "both",
+    "日本語名で保存": "ja",
+    "判別しない": "off",
 }
+# 言語ごとのフォルダ分け。画面の表示 -> Options.split
+SPLIT_CHOICES = {
+    "分けない": "none",
+    "英語版を en に": "en",
+    "ja と en に分ける": "both",
+}
+
+
+def _label_of(choices, value, default):
+    return next((label for label, v in choices.items() if v == value), default)
 
 STATUS_COLORS = {
     CONFIRMED: "#1b7f3b",
@@ -100,9 +109,10 @@ class App:
         self.var_skip_dup = tk.BooleanVar(value=cfg.get("skip_duplicate", True))
         self.var_save_review = tk.BooleanVar(value=cfg.get("save_review", True))
         self.var_save_not_card = tk.BooleanVar(value=cfg.get("save_not_card", True))
-        english = cfg.get("english", "off")
-        self.var_english = tk.StringVar(value=next(
-            (label for label, mode in ENGLISH_CHOICES.items() if mode == english), "判別しない"))
+        self.var_english = tk.StringVar(
+            value=_label_of(ENGLISH_CHOICES, cfg.get("english", "name"), "英語名で保存"))
+        self.var_split = tk.StringVar(
+            value=_label_of(SPLIT_CHOICES, cfg.get("split", "none"), "分けない"))
         self.var_status = tk.StringVar(value="画像かフォルダをここにドロップしてください")
 
     def _build_widgets(self):
@@ -156,9 +166,6 @@ class App:
         ttk.Combobox(row, textvariable=self.var_format, width=8, state="readonly",
                      values=["webp", "png", "both"]).pack(side="left", padx=4)
         ttk.Checkbutton(row, text="角丸・透過", variable=self.var_rounded).pack(side="left", padx=8)
-        ttk.Label(row, text="英語版").pack(side="left", padx=(12, 0))
-        ttk.Combobox(row, textvariable=self.var_english, width=20, state="readonly",
-                     values=list(ENGLISH_CHOICES)).pack(side="left", padx=4)
         row2 = ttk.Frame(opt)
         row2.pack(fill="x", padx=6, pady=(0, 6))
         ttk.Checkbutton(row2, text="サブフォルダも処理", variable=self.var_recursive).pack(side="left")
@@ -168,6 +175,14 @@ class App:
                         variable=self.var_save_review).pack(side="left")
         ttk.Checkbutton(row2, text="判定できない画像も残す（not_card）",
                         variable=self.var_save_not_card).pack(side="left", padx=12)
+        row3 = ttk.Frame(opt)
+        row3.pack(fill="x", padx=6, pady=(0, 6))
+        ttk.Label(row3, text="英語版").pack(side="left")
+        ttk.Combobox(row3, textvariable=self.var_english, width=16, state="readonly",
+                     values=list(ENGLISH_CHOICES)).pack(side="left", padx=4)
+        ttk.Label(row3, text="言語でフォルダを").pack(side="left", padx=(12, 0))
+        ttk.Combobox(row3, textvariable=self.var_split, width=16, state="readonly",
+                     values=list(SPLIT_CHOICES)).pack(side="left", padx=4)
 
         # --- 進捗 ---
         prog = ttk.Frame(root)
@@ -278,7 +293,8 @@ class App:
             recursive=self.var_recursive.get(),
             save_review=self.var_save_review.get(),
             save_not_card=self.var_save_not_card.get(),
-            english=ENGLISH_CHOICES.get(self.var_english.get(), "off"),
+            english=ENGLISH_CHOICES.get(self.var_english.get(), "name"),
+            split=SPLIT_CHOICES.get(self.var_split.get(), "none"),
         )
 
     def _start(self, paths):
@@ -455,7 +471,8 @@ class App:
             "skip_duplicate": self.var_skip_dup.get(),
             "save_review": self.var_save_review.get(),
             "save_not_card": self.var_save_not_card.get(),
-            "english": ENGLISH_CHOICES.get(self.var_english.get(), "off"),
+            "english": ENGLISH_CHOICES.get(self.var_english.get(), "name"),
+            "split": SPLIT_CHOICES.get(self.var_split.get(), "none"),
         })
         save_config(self.config)
 
