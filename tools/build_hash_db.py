@@ -11,6 +11,17 @@
                                   --out data/card_hashes.json
     # すでに作ってあるハッシュキャッシュを流用する場合
     python tools/build_hash_db.py --hash-cache ../MD/json/master_hashes.json ...
+
+英語版の公式DBにしか無いカード（TCG先行・TCGの賞品カードなど）:
+    ygo の en_cards.py が作る master_images_en/（ファイル名がカードID。イラスト違いは
+    <カードID>_1.jpg, _2.jpg）と json/yugioh_cards_en_only.json を、次の引数で読む。
+    カードIDは日本語版と共通なので、名前を通さずにファイル名をそのまま cid として扱う。
+    python tools/build_hash_db.py --master-dir ... --card-json ... \
+                                  --master-dir-en ../YGO-list/master_images_en \
+                                  --card-json-en  ../YGO-list/json/yugioh_cards_en_only.json
+    # 今の同梱DB（--learn で足したハッシュも入っている）に英語版だけのカードを足す場合
+    python tools/build_hash_db.py --base data/card_hashes.json \
+                                  --master-dir-en ... --card-json-en ...
 """
 import argparse
 import json
@@ -40,6 +51,18 @@ def stem_to_key(path: str) -> str:
     return file_key(_VARIANT.sub("", stem))
 
 
+def stem_to_cid(path: str):
+    """master_images_en の画像のファイル名からカードIDを返す（数字でなければ None）。"""
+    stem = _VARIANT.sub("", os.path.splitext(os.path.basename(path))[0])
+    return stem if stem.isdigit() else None
+
+
+def list_images(folder):
+    """フォルダ内のカード画像のパスを名前順に返す。"""
+    return sorted(os.path.join(folder, f) for f in os.listdir(folder)
+                  if f.lower().endswith(EXTS))
+
+
 def hash_one(path):
     try:
         from PIL import Image
@@ -49,83 +72,134 @@ def hash_one(path):
         return os.path.basename(path), None
 
 
+def hash_files(paths, workers):
+    """画像ごとのハッシュ（中央の領域つき）を {ファイル名: hex} で返す。"""
+    out = {}
+    if not paths:
+        return out
+    print(f"ハッシュ計算: {len(paths)} 枚 ...")
+    with ProcessPoolExecutor(max_workers=workers) as ex:
+        for i, (name, h) in enumerate(ex.map(hash_one, paths, chunksize=32), 1):
+            if h:
+                out[name] = h
+            if i % 1000 == 0:
+                print(f"  {i}/{len(paths)}")
+    return out
+
+
+def load_base(path):
+    """既存のハッシュDB（--base）を {cid: [hex, ...]} で読む。生成条件が違えば止める。"""
+    with open(path, encoding="utf-8") as f:
+        raw = json.load(f)
+    meta = raw.get("meta", {})
+    if meta.get("art_boxes") != [list(b) for b in ART_BOXES] or meta.get("hash_size") != HASH_SIZE:
+        sys.exit(f"{path} は今と生成条件が違うため、--base に使えません")
+    return {cid: list(v) for cid, v in (raw.get("hashes") or {}).items()}
+
+
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("--master-dir", required=True)
+    ap.add_argument("--master-dir", help="日本語版のマスター画像のフォルダ（ファイル名がカード名）")
     ap.add_argument("--card-json", help="id / name / english_name を含むカードJSON")
     ap.add_argument("--names-json", help="updater.fetch_card_names() が作った cards.json（新カードの解決に使う）")
     ap.add_argument("--hash-cache", help="既存の master_hashes.json（あれば再計算を省く）")
+    ap.add_argument("--master-dir-en", help="英語版だけのカードの画像のフォルダ（ファイル名がカードID）")
+    ap.add_argument("--card-json-en",
+                    help="英語版だけのカードのJSON（yugioh_cards_en_only.json）。画像の抜けの確認に使う")
+    ap.add_argument("--base", help="このハッシュDBに足す（入っているハッシュは消さない）")
     ap.add_argument("--out", default="data/card_hashes.json")
     ap.add_argument("--workers", type=int, default=0)
     args = ap.parse_args()
+    if not args.master_dir and not args.master_dir_en:
+        ap.error("--master-dir か --master-dir-en のどちらかが必要です")
+    workers = args.workers or max(1, (os.cpu_count() or 2) - 1)
 
-    key_to_id = {}
-    if args.names_json:
-        with open(args.names_json, encoding="utf-8") as f:
-            fetched = json.load(f).get("cards", {})
-        for cid, v in fetched.items():
-            key_to_id.setdefault(file_key(v["n"]), str(cid))
-        print(f"取得済みカード名: {len(fetched)} 件")
-    cards = []
-    if args.card_json:
-        with open(args.card_json, encoding="utf-8") as f:
-            cards = json.load(f)
-    for c in cards:
-        cid = str(c.get("id") or "")
-        if not cid or "name" not in c:
-            continue
-        key_to_id.setdefault(file_key(c["name"]), cid)
-        if c.get("english_name"):
-            key_to_id.setdefault(file_key(c["english_name"]), cid)
-    if not key_to_id:
-        ap.error("--card-json か --names-json のどちらかが必要です")
-    print(f"カードDB: {len(cards)} 件 / 照合キー {len(key_to_id)} 件")
+    hashes = load_base(args.base) if args.base else {}
+    if args.base:
+        print(f"元のハッシュDB: カード {len(hashes)} 種 / ハッシュ {sum(map(len, hashes.values()))} 件")
 
-    files = []
-    for ext in EXTS:
-        files += [os.path.join(args.master_dir, f) for f in os.listdir(args.master_dir)
-                  if f.lower().endswith(ext)]
-    files.sort()
-    print(f"マスター画像: {len(files)} 枚")
-
-
-    cache = {}
-    if args.hash_cache and os.path.exists(args.hash_cache):
-        with open(args.hash_cache, encoding="utf-8") as f:
-            raw = json.load(f)
-        meta = raw.get("meta", {})
-        if (meta.get("art_boxes") == [list(b) for b in ART_BOXES]
-                and meta.get("hash_size") == HASH_SIZE):
-            cache = raw.get("hashes", {})
-            print(f"既存キャッシュを流用: {len(cache)} 件")
-        else:
-            print("既存キャッシュは生成条件が違うため無視します")
-
-    todo = [p for p in files if os.path.basename(p) not in cache]
-    if todo:
-        print(f"ハッシュ計算: {len(todo)} 枚 ...")
-        workers = args.workers or max(1, (os.cpu_count() or 2) - 1)
-        with ProcessPoolExecutor(max_workers=workers) as ex:
-            for i, (name, h) in enumerate(ex.map(hash_one, todo, chunksize=32), 1):
-                if h:
-                    cache[name] = h
-                if i % 1000 == 0:
-                    print(f"  {i}/{len(todo)}")
-
-    hashes, unresolved = {}, []
-    for fname, h in cache.items():
-        cid = key_to_id.get(stem_to_key(fname))
-        if not cid:
-            unresolved.append(fname)
-            continue
+    def add(cid, fname, h):
+        """1枚分のハッシュを hashes に足す（通常のカードは上下の2領域だけにする）。"""
         if cid in SPECIAL_CIDS:
             if len(h) == HASH_HEX:
                 print(f"[警告] {fname}: 中央の領域が無いキャッシュです（キャッシュを作り直してください）")
         else:
-            h = h[:HASH_HEX]             # 通常のカードは上下の2領域だけ
-        hashes.setdefault(cid, [])
-        if h not in hashes[cid]:
-            hashes[cid].append(h)
+            h = h[:HASH_HEX]
+        cur = hashes.setdefault(cid, [])
+        if h not in cur:
+            cur.append(h)
+
+    unresolved = []
+    if args.master_dir:
+        key_to_id = {}
+        if args.names_json:
+            with open(args.names_json, encoding="utf-8") as f:
+                fetched = json.load(f).get("cards", {})
+            for cid, v in fetched.items():
+                key_to_id.setdefault(file_key(v["n"]), str(cid))
+            print(f"取得済みカード名: {len(fetched)} 件")
+        cards = []
+        if args.card_json:
+            with open(args.card_json, encoding="utf-8") as f:
+                cards = json.load(f)
+        for c in cards:
+            cid = str(c.get("id") or "")
+            if not cid or "name" not in c:
+                continue
+            key_to_id.setdefault(file_key(c["name"]), cid)
+            if c.get("english_name"):
+                key_to_id.setdefault(file_key(c["english_name"]), cid)
+        if not key_to_id:
+            ap.error("--master-dir には --card-json か --names-json のどちらかが必要です")
+        print(f"カードDB: {len(cards)} 件 / 照合キー {len(key_to_id)} 件")
+
+        files = list_images(args.master_dir)
+        print(f"マスター画像: {len(files)} 枚")
+
+        cache = {}
+        if args.hash_cache and os.path.exists(args.hash_cache):
+            with open(args.hash_cache, encoding="utf-8") as f:
+                raw = json.load(f)
+            meta = raw.get("meta", {})
+            if (meta.get("art_boxes") == [list(b) for b in ART_BOXES]
+                    and meta.get("hash_size") == HASH_SIZE):
+                cache = raw.get("hashes", {})
+                print(f"既存キャッシュを流用: {len(cache)} 件")
+            else:
+                print("既存キャッシュは生成条件が違うため無視します")
+
+        cache.update(hash_files([p for p in files if os.path.basename(p) not in cache], workers))
+        for fname, h in cache.items():
+            cid = key_to_id.get(stem_to_key(fname))
+            if cid:
+                add(cid, fname, h)
+            else:
+                unresolved.append(fname)
+
+    if args.master_dir_en:
+        # ファイル名がカードIDなので、名前の対応表を通さない
+        # （キャッシュはファイル名で引くので、日本語版の画像と混ぜないよう使わない。数十枚なのですぐ終わる）
+        files = list_images(args.master_dir_en)
+        print(f"英語版だけのカードの画像: {len(files)} 枚")
+        en_cids = set()
+        for fname, h in sorted(hash_files(files, workers).items()):
+            cid = stem_to_cid(fname)
+            if cid:
+                add(cid, fname, h)
+                en_cids.add(cid)
+            else:
+                unresolved.append(fname)
+        print(f"英語版だけのカード: {len(en_cids)} 種")
+        if args.card_json_en:
+            with open(args.card_json_en, encoding="utf-8") as f:
+                listed = {str(c.get("id")) for c in json.load(f) if c.get("id")}
+            lacking = sorted(listed - en_cids, key=int)
+            if lacking:
+                print(f"[警告] 画像の無い英語版だけのカード {len(lacking)} 件（例: {lacking[:5]}）")
+            moved = len(en_cids - listed)
+            if moved:
+                # 日本語版でも出て JSON から外れたカード。カードIDは同じなので照合にはそのまま使える
+                print(f"  （うち {moved} 種は日本語版にも入ったカード）")
 
     out = {
         "meta": {

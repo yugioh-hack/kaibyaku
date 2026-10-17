@@ -7,6 +7,10 @@
   * fetch_card_names() : カード名・ルビの一覧（数十秒）
   * update_new_sets()  : 新しいカードセットの分だけハッシュを取得・更新
 
+日本語版のページ（request_locale=ja）を基本にし、日本語版に無いカード
+（TCG先行・TCGの賞品カードなど）だけ英語版のページ（request_locale=en）を使う。
+カードIDは日英で共通なので、照合用のデータはどちらもカードIDで持つ。
+
 標準ライブラリだけで動かす（requests を使わない）ことで、
 配布物の依存を Pillow / numpy だけに保っている。
 """
@@ -116,45 +120,74 @@ def _parse_rows(page_html):
     return out
 
 
-def fetch_card_names(progress=None, should_stop=None):
-    """公式DBからカード名・ルビの一覧を取得して {cid: {"n":名前, "r":ルビ}} を返す。"""
-    op = _opener()
-    cards, page = {}, 1
+def _fetch_name_list(op, locale, progress=None, should_stop=None, label="カード名を取得中"):
+    """カードの全件検索を locale の言語で1ページずつ取り、[{id, name, ruby}, ...] を返す。"""
+    rows_all, page = [], 1
     while True:
         if should_stop and should_stop():
             raise Cancelled()
         params = urllib.parse.urlencode({
             "ope": "1", "sess": "1", "rp": str(PAGE_SIZE), "page": str(page),
             "sort": "1", "keyword": "", "stype": "1", "othercon": "2",
-            "request_locale": "ja",
+            "request_locale": locale,
         })
         rows = _parse_rows(_text(_get(op, f"{SEARCH}?{params}")))
-        for r in rows:
-            cards[r["id"]] = {"n": r["name"], "r": r["ruby"]}
+        rows_all += rows
         if progress:
-            progress(f"カード名を取得中... {len(cards)} 件")
+            progress(f"{label}... {len(rows_all)} 件")
         if len(rows) < PAGE_SIZE:
             break
         page += 1
         time.sleep(REQUEST_INTERVAL)
         if page > 60:                      # 想定外のページ数で無限ループしない
             break
+    return rows_all
+
+
+def fetch_card_names(progress=None, should_stop=None):
+    """公式DBからカード名・ルビの一覧を取得して {cid: {"n":名前, "r":ルビ}} を返す。
+
+    日本語版に無いカード（TCG先行・TCGの賞品カードなど）は、英語版の一覧から
+    英語名を補って {"n":英語名, "r":"", "l":"en"} にする。カードIDは日英で共通。
+    英語版の一覧が取れなかったときは、日本語版の分だけを返す。
+    """
+    op = _opener()
+    cards = {}
+    for r in _fetch_name_list(op, "ja", progress, should_stop):
+        cards[r["id"]] = {"n": r["name"], "r": r["ruby"]}
     if not cards:
         # メンテナンス中やページの作りが変わった場合。取得済みのカード名を空で上書きしない
         raise RuntimeError("カード名を1件も取得できませんでした。"
                            "公式データベースがメンテナンス中の可能性があります。")
+    time.sleep(REQUEST_INTERVAL)
+    try:
+        en_rows = _fetch_name_list(op, "en", progress, should_stop, "英語版のカード名を確認中")
+    except Cancelled:
+        raise
+    except Exception:
+        en_rows = []
+    for r in en_rows:
+        if r["id"] not in cards:
+            cards[r["id"]] = {"n": r["name"], "r": "", "l": "en"}
     return cards
 
 
-def fetch_card_page(cid, op=None):
+def en_only_cids(cards):
+    """カード名一覧のうち、英語版にしか無いカードのIDの集合を返す。"""
+    return {cid for cid, v in cards.items() if isinstance(v, dict) and v.get("l") == "en"}
+
+
+def fetch_card_page(cid, op=None, locale="ja"):
     """1枚のカードページから (公式画像のリスト, 収録パックIDのリスト) を返す。
 
     画像URLには毎回変わる enc トークンが必要なので、必ずカードページを経由する。
     イラスト違いは ciid 違いの画像として並んでいるので、まとめて取る。
+    英語版だけのカードは locale="en" のページから取る（ページの作りは同じ）。
+    英語版の収録パックIDは日本語版と別の番号なので、そのときは収録パックを返さない。
     """
     from PIL import Image
     op = op or _opener()
-    page = f"{SEARCH}?ope=2&cid={cid}&request_locale=ja"
+    page = f"{SEARCH}?ope=2&cid={cid}&request_locale={locale}"
     body = _text(_get(op, page))
     seen, images = set(), []
     for src in _IMG_SRC.findall(body):
@@ -174,7 +207,7 @@ def fetch_card_page(cid, op=None):
             images.append(im.convert("RGB"))
         except Exception:
             continue
-    packs = sorted(set(_PID.findall(body)))
+    packs = sorted(set(_PID.findall(body))) if locale == "ja" else []
     return images, packs
 
 
@@ -188,11 +221,14 @@ def fetch_pack_cards(pid, op=None):
     return [row["id"] for row in _parse_rows(body)]
 
 
-def update_hashes(hash_db, cids, progress=None, should_stop=None, label="カード画像を取得中"):
+def update_hashes(hash_db, cids, progress=None, should_stop=None, label="カード画像を取得中",
+                  en_cids=()):
     """cids のカード画像を取得して hash_db（{cid: [hex, ...]}）に追加する。
 
     既にあるハッシュは消さずに、新しいイラストの分だけ足す
     （古いイラストのスクショも判定できるようにするため）。
+    en_cids に入っているカード（英語版だけのカード）は英語版のページから取る。
+    それ以外でも、日本語版のページに画像が無ければ英語版のページを試す。
     戻り値は (画像を取得できたカード数, 新しく増えたハッシュ数,
               失敗した cid のリスト, 見つかった収録パックIDの集合)。
     """
@@ -205,7 +241,14 @@ def update_hashes(hash_db, cids, progress=None, should_stop=None, label="カー�
         if should_stop and should_stop():
             raise Cancelled()
         try:
-            images, card_packs = fetch_card_page(cid, op)
+            if cid in en_cids:
+                images, card_packs = fetch_card_page(cid, op, locale="en")
+            else:
+                images, card_packs = fetch_card_page(cid, op)
+                if not images:
+                    # 日本語版のページに画像が無いカード（英語版が先に出たもの）は英語版から取る
+                    time.sleep(REQUEST_INTERVAL)
+                    images, _ = fetch_card_page(cid, op, locale="en")
             packs.update(card_packs)
             special = cid in SPECIAL_CIDS     # 中央の領域も持たせるカード
             hexes = [artwork_phash_hex(im, with_center=special) for im in images]
@@ -293,7 +336,8 @@ def update_new_sets(catalog, cards, progress=None, should_stop=None, max_cards=4
         if progress:
             progress(f"ハッシュの無いカード {len(missing)} 件を取得します...")
         done, new_hashes, failed, card_packs = update_hashes(
-            catalog.hashes, missing, progress, should_stop, "新しいカードを取得中")
+            catalog.hashes, missing, progress, should_stop, "新しいカードを取得中",
+            en_cids=en_only_cids(cards))
         result.update(new_cards=done, new_hashes=new_hashes, failed=failed)
         # 一覧に出ていないシリーズ（先行販売など）はカード側から拾う
         if all_packs:

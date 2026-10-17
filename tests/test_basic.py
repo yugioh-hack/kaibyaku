@@ -397,6 +397,49 @@ class TestRegress(unittest.TestCase):
         self.assertEqual(r.compare_screenshots(shots(290), None), [])
 
 
+class TestBuildHashDb(unittest.TestCase):
+    """tools/build_hash_db.py の、英語版だけのカード（ファイル名がカードID）を足す入口。"""
+
+    @classmethod
+    def setUpClass(cls):
+        sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "tools"))
+        import build_hash_db
+        cls.build = build_hash_db
+
+    def test_file_name_is_the_card_id(self):
+        self.assertEqual(self.build.stem_to_cid("x/23513.jpg"), "23513")
+        self.assertEqual(self.build.stem_to_cid("23513_2.jpg"), "23513")
+        self.assertIsNone(self.build.stem_to_cid("Audhumla.jpg"))
+
+    def test_english_only_images_are_added_to_the_base(self):
+        import json
+        from unittest import mock
+        with tempfile.TemporaryDirectory() as tmp:
+            en_dir = os.path.join(tmp, "master_images_en")
+            os.makedirs(en_dir)
+            fake_card(seed=1).save(os.path.join(en_dir, "23513_1.jpg"))
+            fake_card(seed=2).save(os.path.join(en_dir, "23513_2.jpg"))
+            fake_card(seed=3).save(os.path.join(en_dir, "23514.jpg"))
+            card_json = os.path.join(tmp, "en_only.json")
+            with open(card_json, "w", encoding="utf-8") as f:
+                json.dump([{"id": "23513", "english_name": "Audhumla"}], f)
+            base = os.path.join(tmp, "base.json")
+            with open(base, "w", encoding="utf-8") as f:
+                json.dump({"meta": {"art_boxes": [list(b) for b in ART_BOXES], "hash_size": 8},
+                           "hashes": {"4868": ["ab" * 16]}}, f)
+            out = os.path.join(tmp, "out.json")
+            argv = ["build_hash_db.py", "--base", base, "--master-dir-en", en_dir,
+                    "--card-json-en", card_json, "--out", out, "--workers", "1"]
+            with mock.patch.object(sys, "argv", argv), mock.patch("builtins.print"):
+                self.build.main()
+            with open(out, encoding="utf-8") as f:
+                hashes = json.load(f)["hashes"]
+        self.assertEqual(hashes["4868"], ["ab" * 16])        # 元のハッシュは残す
+        self.assertEqual(len(hashes["23513"]), 2)            # イラスト違いは同じカードIDに
+        self.assertEqual(len(hashes["23514"]), 1)            # JSON に無くても画像があれば入れる
+        self.assertEqual(len(hashes["23513"][0]), HASH_HEX)
+
+
 class FakeCatalog:
     """通信テスト用の最小限のカタログ。"""
 
@@ -419,10 +462,13 @@ class TestUpdater(unittest.TestCase):
         self.pack_cards = {"1000000001000": ["1"], "1000000002000": ["1", "2"]}
         updater.fetch_pack_cards = lambda pid, op=None: self.pack_cards[pid]
         self.fetched = []
+        self.no_ja_page = set()        # 日本語版のページに画像が無いカード
 
-        def fake_card_page(cid, op=None):
-            self.fetched.append(cid)
-            return [fake_card(seed=int(cid))], ["1000000002000"]
+        def fake_card_page(cid, op=None, locale="ja"):
+            self.fetched.append(cid if locale == "ja" else f"{cid}:{locale}")
+            if locale == "ja" and cid in self.no_ja_page:
+                return [], []
+            return [fake_card(seed=int(cid))], (["1000000002000"] if locale == "ja" else [])
 
         updater.fetch_card_page = fake_card_page
 
@@ -473,6 +519,46 @@ class TestUpdater(unittest.TestCase):
         self.updater._get = lambda op, url, **kw: b"<html>maintenance</html>"
         with self.assertRaises(RuntimeError):
             self.updater.fetch_card_names()
+
+    def _name_pages(self, ja_rows, en_rows):
+        """カード名の検索結果のページを、request_locale ごとに返す _get を作る。"""
+        def page(rows):
+            return "".join(f'<div class="t_row"><input class="cid" value="{cid}">'
+                           f'<span class="card_name">{name}</span></div>'
+                           for cid, name in rows).encode("utf-8")
+
+        def fake_get(op, url, **kw):
+            if "request_locale=en" in url:
+                if en_rows is None:
+                    raise OSError("offline")
+                return page(en_rows)
+            return page(ja_rows)
+        return fake_get
+
+    def test_names_of_english_only_cards_are_added(self):
+        """日本語版に無いカードだけ、英語版の一覧から英語名を補う（日本語名は上書きしない）。"""
+        self.updater._get = self._name_pages([("1", "日本語名")],
+                                             [("1", "English 1"), ("23513", "Audhumla")])
+        cards = self.updater.fetch_card_names()
+        self.assertEqual(cards["1"]["n"], "日本語名")
+        self.assertEqual(cards["23513"], {"n": "Audhumla", "r": "", "l": "en"})
+        self.assertEqual(self.updater.en_only_cids(cards), {"23513"})
+
+    def test_english_list_failure_keeps_the_japanese_names(self):
+        self.updater._get = self._name_pages([("1", "日本語名")], None)
+        self.assertEqual(self.updater.fetch_card_names(), {"1": {"n": "日本語名", "r": ""}})
+
+    def test_english_only_cards_are_fetched_from_the_english_page(self):
+        catalog = FakeCatalog({"1": ["0" * 16]}, packs=["1000000001000", "1000000002000"])
+        catalog.names["23513"] = {"n": "Audhumla", "r": "", "l": "en"}
+        catalog.names["2"] = {"n": "英語版が先に出たカード"}
+        self.no_ja_page.add("2")
+        result = self.updater.update_new_sets(catalog, catalog.names)
+        self.assertEqual(result["new_cards"], 2)
+        self.assertEqual(sorted(self.fetched), sorted(["2", "2:en", "23513:en"]))
+        self.assertIn("23513", catalog.hashes)
+        self.assertIn("2", catalog.hashes)
+        self.assertEqual(result["failed"], [])
 
     def test_no_wait_after_the_last_retry(self):
         waits = []
