@@ -7,7 +7,7 @@ import sys
 
 from .catalog import Catalog
 from .layout import TRUSTED, card_boxes
-from .pipeline import CONFIRMED, ERROR, NOT_CARD, REVIEW, Cropper, Options
+from .pipeline import CONFIRMED, ENGLISH_MODES, ERROR, NOT_CARD, REVIEW, Cropper, Options
 
 
 def _resolution(text):
@@ -45,6 +45,9 @@ def build_parser():
                    help="カードと判定できなかった画像を保存しない")
     p.add_argument("--resolution", type=_resolution, default="auto",
                    help="auto / fixed / 1920x1080 のように元の解像度を指定")
+    p.add_argument("--english", choices=ENGLISH_MODES, default="off",
+                   help="英語クライアントのスクショの扱い。name: 英語名で保存 / "
+                        "folder: en/ に分ける / both: 英語名で en/ に分ける（既定: off）")
     p.add_argument("--gui", action="store_true", help="GUI を開く")
     p.add_argument("--update-names", action="store_true",
                    help="公式データベースからカード名を取得する")
@@ -144,6 +147,7 @@ def main(argv=None):
         recursive=not args.no_recursive,
         save_review=not args.no_review,
         save_not_card=not args.no_not_card,
+        english=args.english,
     )
     cropper = Cropper(catalog, options)
 
@@ -151,6 +155,8 @@ def main(argv=None):
         mark = {CONFIRMED: "[確定]", REVIEW: "[要確認]",
                 NOT_CARD: "[カードなし]", ERROR: "[エラー]"}[result.status]
         detail = result.name or result.note
+        if result.english:
+            detail += " [英語版]"
         print(f"{mark} {detail} (距離 {result.distance}) <- {result.source}")
 
     summary = cropper.process(args.paths, on_result=show)

@@ -13,6 +13,7 @@ from dataclasses import dataclass, field
 from PIL import Image, ImageDraw
 
 from .catalog import Catalog
+from .language import is_english
 from .layout import (COARSE_SCALES, COARSE_SHIFTS, CORNER_RADIUS_RATIO, ESTIMATED,
                      FINE_SCALES, FINE_SHIFTS, TRUSTED, box_is_on_card_edges, card_boxes,
                      nudged_boxes)
@@ -36,6 +37,11 @@ REVIEW_DIFF = 36          # ここまでは「要確認」として残す
 DUPLICATE_DIFF = 10       # 同じ場所にある同名ファイルとの重複イラスト判定
 
 SKIPPED_NOTE = "同じイラストがすでにあるのでスキップ"
+ENGLISH_NOTE = "英語版"
+NO_ENGLISH_NAME_NOTE = "英語版（英語名が未取得のため日本語名で保存）"
+
+# 英語版（英語クライアントのスクショ）の扱い。英語名にするか、en/ に分けるか
+ENGLISH_MODES = ("off", "name", "folder", "both")
 _EXTS_BY_FORMAT = {"webp": (".webp",), "png": (".png",), "both": (".webp", ".png")}
 
 CONFIRMED = "確定"
@@ -59,6 +65,8 @@ class Options:
     recursive: bool = True
     write_csv: bool = True
     workers: int = 0                   # 0 で自動
+    english: str = "off"               # off / name（英語名）/ folder（en/ に分ける）/ both
+    english_subdir: str = "en"
 
 
 @dataclass
@@ -71,6 +79,7 @@ class Result:
     margin: int = 0
     saved_path: str = ""
     note: str = ""
+    english: bool = False
 
 
 @dataclass
@@ -320,7 +329,10 @@ class Cropper:
 
             diff, margin = found["distance"], found["margin"]
             cid = found["card_id"]
-            name = self.catalog.display_name(cid)
+            english, note = (self._english(found, cid) if diff <= REVIEW_DIFF
+                             else (False, ""))
+            name = self.catalog.display_name(
+                cid, english=english and self.options.english in ("name", "both"))
 
             if self.is_confirmed(found):
                 status, target = CONFIRMED, self.options.output_dir
@@ -329,7 +341,7 @@ class Cropper:
                 target = os.path.join(self.options.output_dir, self.options.review_subdir)
                 if not self.options.save_review:
                     return Result(path, REVIEW, cid, name, diff, margin,
-                                  note="要確認のため保存しませんでした")
+                                  note="要確認のため保存しませんでした", english=english)
             else:
                 # 知らないカード（＝マスター画像が無い新イラスト）の可能性もあるので、
                 # 黙って捨てずに not_card/ へ元のファイル名で残す
@@ -345,10 +357,23 @@ class Cropper:
                               saved_path=saved or "",
                               note=note or "カードの拡大画面ではないようです")
 
-            saved, note = self._save(found["card"], target, name, found["hash"])
-            return Result(path, status, cid, name, diff, margin, saved or "", note)
+            if english and self.options.english in ("folder", "both"):
+                target = os.path.join(target, self.options.english_subdir)
+            saved, skipped = self._save(found["card"], target, name, found["hash"])
+            return Result(path, status, cid, name, diff, margin, saved or "",
+                          skipped or note, english)
         except Exception as exc:
             return Result(path, ERROR, note=f"{type(exc).__name__}: {exc}")
+
+    def _english(self, found, cid):
+        """英語版として扱うかと、そのときの備考を返す。"""
+        if self.options.english not in ("name", "folder", "both"):
+            return False, ""
+        if not is_english(found["card"]):
+            return False, ""
+        if self.options.english in ("name", "both") and not self.catalog.has_english_name(cid):
+            return True, NO_ENGLISH_NAME_NOTE
+        return True, ENGLISH_NOTE
 
     # ---------- まとめて処理 ----------
     def process(self, paths, on_result=None, should_stop=None):

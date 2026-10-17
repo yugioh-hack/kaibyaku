@@ -27,6 +27,14 @@ try:                                     # ドラッグ＆ドロップ（無く�
 except Exception:                        # pragma: no cover
     DND_FILES, TkinterDnD, _DND = None, None, False
 
+# 英語版（英語クライアントのスクショ）の扱い。画面の表示 -> Options.english
+ENGLISH_CHOICES = {
+    "判別しない": "off",
+    "英語名で保存": "name",
+    "en に分ける": "folder",
+    "英語名で en に分ける": "both",
+}
+
 STATUS_COLORS = {
     CONFIRMED: "#1b7f3b",
     REVIEW: "#b8860b",
@@ -92,6 +100,9 @@ class App:
         self.var_skip_dup = tk.BooleanVar(value=cfg.get("skip_duplicate", True))
         self.var_save_review = tk.BooleanVar(value=cfg.get("save_review", True))
         self.var_save_not_card = tk.BooleanVar(value=cfg.get("save_not_card", True))
+        english = cfg.get("english", "off")
+        self.var_english = tk.StringVar(value=next(
+            (label for label, mode in ENGLISH_CHOICES.items() if mode == english), "判別しない"))
         self.var_status = tk.StringVar(value="画像かフォルダをここにドロップしてください")
 
     def _build_widgets(self):
@@ -145,6 +156,9 @@ class App:
         ttk.Combobox(row, textvariable=self.var_format, width=8, state="readonly",
                      values=["webp", "png", "both"]).pack(side="left", padx=4)
         ttk.Checkbutton(row, text="角丸・透過", variable=self.var_rounded).pack(side="left", padx=8)
+        ttk.Label(row, text="英語版").pack(side="left", padx=(12, 0))
+        ttk.Combobox(row, textvariable=self.var_english, width=20, state="readonly",
+                     values=list(ENGLISH_CHOICES)).pack(side="left", padx=4)
         row2 = ttk.Frame(opt)
         row2.pack(fill="x", padx=6, pady=(0, 6))
         ttk.Checkbutton(row2, text="サブフォルダも処理", variable=self.var_recursive).pack(side="left")
@@ -264,6 +278,7 @@ class App:
             recursive=self.var_recursive.get(),
             save_review=self.var_save_review.get(),
             save_not_card=self.var_save_not_card.get(),
+            english=ENGLISH_CHOICES.get(self.var_english.get(), "off"),
         )
 
     def _start(self, paths):
@@ -323,7 +338,7 @@ class App:
                     self.var_status.set(f"処理中... {done}/{total}")
                     self.tree.insert("", "end", tags=(result.status,), values=(
                         result.status,
-                        result.name or "-",
+                        (result.name or "-") + ("  [英語版]" if result.english else ""),
                         result.distance if result.distance < 999 else "-",
                         os.path.basename(result.source) + (f"  [{result.note}]" if result.note else ""),
                     ))
@@ -366,7 +381,7 @@ class App:
             "カード名とマスター画像はアプリに含まれていません。\n"
             "必要なときに遊戯王公式データベースから取得します。\n\n"
             "・カード名を取得: 出力ファイル名を日本語のカード名にします（約30秒）\n"
-            "　（日本語版に無いカードは英語名になります）\n"
+            "　（日本語版に無いカードは英語名。英語版の保存に使う英語名も取得します）\n"
             "・新しいカードを追加: ハッシュに無いカードの画像を取得して照合できるようにします\n"
             "　（1枚ずつ取得するため、枚数によっては時間がかかります）"
         )).pack(anchor="w", padx=12, pady=12)
@@ -440,6 +455,7 @@ class App:
             "skip_duplicate": self.var_skip_dup.get(),
             "save_review": self.var_save_review.get(),
             "save_not_card": self.var_save_not_card.get(),
+            "english": ENGLISH_CHOICES.get(self.var_english.get(), "off"),
         })
         save_config(self.config)
 

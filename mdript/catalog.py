@@ -190,11 +190,19 @@ class Catalog:
     def has_names(self):
         return bool(self.names)
 
-    def display_name(self, cid):
+    def display_name(self, cid, english=False):
+        """出力ファイル名に使うカード名。english=True なら英語名（無ければ日本語名）。"""
         info = self.names.get(str(cid))
+        if english and info and isinstance(info.get("e"), str) and info["e"]:
+            return info["e"]
         if info and isinstance(info.get("n"), str) and info["n"]:
             return info["n"]
         return f"cid_{cid}"
+
+    def has_english_name(self, cid):
+        """英語名が分かっているか（日本語版に無いカードは、カード名そのものが英語名）。"""
+        info = self.names.get(str(cid)) or {}
+        return bool(info.get("e")) or info.get("l") == "en"
 
     def rank(self, hex_hash, top=3, coarse=False, center=None):
         """距離の近い順に [(距離, カードID), ...] を返す（同じカードは1件にまとめる）。

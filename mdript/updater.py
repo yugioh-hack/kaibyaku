@@ -145,10 +145,11 @@ def _fetch_name_list(op, locale, progress=None, should_stop=None, label="カー�
 
 
 def fetch_card_names(progress=None, should_stop=None):
-    """公式DBからカード名・ルビの一覧を取得して {cid: {"n":名前, "r":ルビ}} を返す。
+    """公式DBからカード名・ルビの一覧を取得して {cid: {"n":名前, "r":ルビ, "e":英語名}} を返す。
 
-    日本語版に無いカード（TCG先行・TCGの賞品カードなど）は、英語版の一覧から
-    英語名を補って {"n":英語名, "r":"", "l":"en"} にする。カードIDは日英で共通。
+    英語名 "e" は英語版の一覧にあるカードだけに付く（英語クライアントのスクショを
+    英語名で保存するときに使う）。日本語版に無いカード（TCG先行・TCGの賞品カードなど）は
+    {"n":英語名, "r":"", "l":"en"} にする。カードIDは日英で共通。
     英語版の一覧が取れなかったときは、日本語版の分だけを返す。
     """
     op = _opener()
@@ -169,6 +170,8 @@ def fetch_card_names(progress=None, should_stop=None):
     for r in en_rows:
         if r["id"] not in cards:
             cards[r["id"]] = {"n": r["name"], "r": "", "l": "en"}
+        elif r["name"]:
+            cards[r["id"]]["e"] = r["name"]
     return cards
 
 

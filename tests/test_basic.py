@@ -195,6 +195,49 @@ class TestPipelineHelpers(unittest.TestCase):
                          ["C:/a.png", "C:/my shots/b.png", "C:/card{1}.png"])
 
 
+def draw_text_strokes(img, box, vertical):
+    """カードのテキスト欄に、文字の代わりの暗い線を並べる。
+
+    vertical=True は縦画の多い英字、False は横画の多い漢字の代わり。
+    """
+    from PIL import ImageDraw
+    from mdript.language import TEXT_BOX_RATIO
+    img = img.copy()
+    draw = ImageDraw.Draw(img)
+    l, t, r, b = box
+    w, h = r - l, b - t
+    x0, x1 = l + int(w * (TEXT_BOX_RATIO[0] + 0.02)), l + int(w * (TEXT_BOX_RATIO[2] - 0.02))
+    y0, y1 = t + int(h * (TEXT_BOX_RATIO[1] + 0.01)), t + int(h * (TEXT_BOX_RATIO[3] - 0.01))
+    size = max(8, int(h * 0.018))                      # 1文字の大きさ
+    for y in range(y0, y1 - size, size * 2):
+        for x in range(x0, x1 - size, size * 2):
+            if vertical:
+                draw.line((x, y, x, y + size), fill=(30, 30, 30), width=2)
+                draw.line((x + size // 2, y, x + size // 2, y + size), fill=(30, 30, 30), width=2)
+            else:
+                draw.line((x, y, x + size, y), fill=(30, 30, 30), width=2)
+                draw.line((x, y + size // 2, x + size, y + size // 2), fill=(30, 30, 30), width=2)
+    return img
+
+
+class TestLanguage(unittest.TestCase):
+    def test_vertical_strokes_are_english(self):
+        from mdript.language import is_english
+        card = draw_text_strokes(fake_card(), (0, 0, 894, 1302), vertical=True)
+        self.assertTrue(is_english(card))
+        self.assertTrue(is_english(card.resize((447, 651), Image.LANCZOS)))
+
+    def test_horizontal_strokes_are_japanese(self):
+        from mdript.language import is_english
+        card = draw_text_strokes(fake_card(), (0, 0, 894, 1302), vertical=False)
+        self.assertFalse(is_english(card))
+
+    def test_blank_text_box_is_not_judged(self):
+        from mdript.language import is_english, stroke_ratio
+        self.assertIsNone(stroke_ratio(fake_card()))
+        self.assertFalse(is_english(fake_card()))
+
+
 class TestIdentify(unittest.TestCase):
     """作り物のハッシュDBで、切り抜き→照合→保存まで通す。"""
 
@@ -219,6 +262,46 @@ class TestIdentify(unittest.TestCase):
             self.assertEqual(result.status, CONFIRMED)
             self.assertEqual(result.name, "テストカード")
             self.assertTrue(os.path.exists(result.saved_path))
+
+    def _process_english(self, mode, vertical=True):
+        from mdript.pipeline import Cropper, Options
+        shot = fake_screenshot(seed=0)
+        shot = draw_text_strokes(shot, predict_card_box(shot.size), vertical=vertical)
+        with tempfile.TemporaryDirectory() as tmp:
+            source = os.path.join(tmp, "shot.png")
+            shot.save(source)
+            out = os.path.join(tmp, "out")
+            result = Cropper(self.catalog, Options(output_dir=out, write_csv=False,
+                                                   english=mode)).process_file(source)
+            saved = os.path.relpath(result.saved_path, out) if result.saved_path else ""
+        return result, saved
+
+    def test_english_screenshot_is_saved_by_the_mode(self):
+        from mdript.pipeline import CONFIRMED, ENGLISH_NOTE
+        self.catalog.names["1"]["e"] = "Test Card"
+        result, saved = self._process_english("both")
+        self.assertEqual(result.status, CONFIRMED)
+        self.assertTrue(result.english)
+        self.assertEqual(result.note, ENGLISH_NOTE)
+        self.assertEqual(saved, os.path.join("en", "Test Card.webp"))
+        self.assertEqual(self._process_english("name")[1], "Test Card.webp")
+        self.assertEqual(self._process_english("folder")[1], os.path.join("en", "テストカード.webp"))
+        result, saved = self._process_english("off")
+        self.assertFalse(result.english)
+        self.assertEqual(saved, "テストカード.webp")
+
+    def test_japanese_screenshot_keeps_the_japanese_name(self):
+        self.catalog.names["1"]["e"] = "Test Card"
+        result, saved = self._process_english("both", vertical=False)
+        self.assertFalse(result.english)
+        self.assertEqual(saved, "テストカード.webp")
+
+    def test_english_name_falls_back_when_not_fetched(self):
+        from mdript.pipeline import NO_ENGLISH_NAME_NOTE
+        result, saved = self._process_english("name")
+        self.assertTrue(result.english)
+        self.assertEqual(result.note, NO_ENGLISH_NAME_NOTE)
+        self.assertEqual(saved, "テストカード.webp")
 
     def test_add_hash_teaches_a_card_with_a_different_crop(self):
         """マスター画像と描画が違うカードも、MD 版のハッシュを足せば確定する。"""
@@ -536,11 +619,12 @@ class TestUpdater(unittest.TestCase):
         return fake_get
 
     def test_names_of_english_only_cards_are_added(self):
-        """日本語版に無いカードだけ、英語版の一覧から英語名を補う（日本語名は上書きしない）。"""
+        """日本語版に無いカードは英語名をカード名にし、ほかのカードには英語名を "e" に足す。"""
         self.updater._get = self._name_pages([("1", "日本語名")],
                                              [("1", "English 1"), ("23513", "Audhumla")])
         cards = self.updater.fetch_card_names()
         self.assertEqual(cards["1"]["n"], "日本語名")
+        self.assertEqual(cards["1"]["e"], "English 1")       # 英語版の保存に使う英語名
         self.assertEqual(cards["23513"], {"n": "Audhumla", "r": "", "l": "en"})
         self.assertEqual(self.updater.en_only_cids(cards), {"23513"})
 
