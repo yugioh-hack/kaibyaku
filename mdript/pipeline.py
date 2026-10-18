@@ -197,6 +197,11 @@ class Cropper:
         self.options = options or Options()
         self._lock = threading.Lock()
         self._saved = {}               # 出力パス -> ハッシュ（同時保存の衝突回避）
+        # まとめて処理するときは、保存名の予約（_alt の番号・重複スキップ）を入力の順に行う。
+        # 並列で処理しても、どの画像が _alt1 になるか・スキップされるかを毎回同じにするため
+        self._turn = threading.Condition(self._lock)
+        self._next_turn = 0
+        self._finished_turns = set()
 
     # ---------- 1枚の判定 ----------
     def _evaluate(self, img, box, origin, coarse=False):
@@ -303,36 +308,53 @@ class Cropper:
                 or (diff <= CONFIRM_DIFF_WIDE and margin >= CONFIRM_MARGIN_WIDE))
 
     # ---------- 保存 ----------
-    def _save(self, card, target_dir, name, hex_hash):
+    def _save(self, card, target_dir, name, hex_hash, turn=None):
+        """turn は入力の中での順番。指定すると、それより前の画像の予約が済むまで待つ。"""
         os.makedirs(target_dir, exist_ok=True)
         exts = _EXTS_BY_FORMAT.get(self.options.save_format, (".webp",))
         base = safe_filename(name)
         with self._lock:
-            stem = os.path.join(target_dir, base)
-            index = 1
-            while True:
-                # both のときは .webp と .png のどちらかが使われていれば別名にする
-                taken = [stem + ext for ext in exts
-                         if stem + ext in self._saved or os.path.exists(stem + ext)]
-                if not taken:
-                    break
-                if self.options.skip_duplicate:
-                    for path in taken:
-                        other = self._saved.get(path)
-                        if other is None:
-                            other = self._artwork_hash_of(path) or ""
-                            self._saved[path] = other
-                        if other and hamming(other, hex_hash) <= DUPLICATE_DIFF:
-                            return None, SKIPPED_NOTE
-                stem = os.path.join(target_dir, f"{base}_alt{index}")
-                index += 1
-            for ext in exts:
-                self._saved[stem + ext] = hex_hash
+            if turn is not None:
+                self._turn.wait_for(lambda: self._next_turn == turn)
+            try:
+                stem = os.path.join(target_dir, base)
+                index = 1
+                while True:
+                    # both のときは .webp と .png のどちらかが使われていれば別名にする
+                    taken = [stem + ext for ext in exts
+                             if stem + ext in self._saved or os.path.exists(stem + ext)]
+                    if not taken:
+                        break
+                    if self.options.skip_duplicate:
+                        for path in taken:
+                            other = self._saved.get(path)
+                            if other is None:
+                                other = self._artwork_hash_of(path) or ""
+                                self._saved[path] = other
+                            if other and hamming(other, hex_hash) <= DUPLICATE_DIFF:
+                                return None, SKIPPED_NOTE
+                    stem = os.path.join(target_dir, f"{base}_alt{index}")
+                    index += 1
+                for ext in exts:
+                    self._saved[stem + ext] = hex_hash
+            finally:
+                if turn is not None:
+                    self._finish_turn(turn)       # 書き出しは待たずに次の画像へ順番を回す
 
         image = rounded_alpha(card) if self.options.rounded else card.convert("RGB")
         for ext in exts:
             self._encode(image, stem + ext, ext)
         return stem + exts[0], ""
+
+    def _finish_turn(self, turn):
+        """turn の画像の予約が済んだ（または保存しない）ことを記録する。_lock を持って呼ぶ。"""
+        if turn < self._next_turn:
+            return
+        self._finished_turns.add(turn)
+        while self._next_turn in self._finished_turns:
+            self._finished_turns.discard(self._next_turn)
+            self._next_turn += 1
+        self._turn.notify_all()
 
     def _encode(self, image, path, ext):
         if ext == ".webp":
@@ -348,7 +370,7 @@ class Cropper:
             return None
 
     # ---------- 1ファイルの処理 ----------
-    def process_file(self, path):
+    def process_file(self, path, turn=None):
         try:
             with Image.open(path) as raw:
                 img = raw.convert("RGB")
@@ -381,13 +403,13 @@ class Cropper:
                 saved, note = self._save(
                     found["card"], os.path.join(self.options.output_dir,
                                                 self.options.not_card_subdir),
-                    stem, found["hash"])
+                    stem, found["hash"], turn)
                 return Result(path, NOT_CARD, distance=diff, margin=margin,
                               saved_path=saved or "",
                               note=note or "カードの拡大画面ではないようです")
 
             target = self._language_dir(target, english)
-            saved, skipped = self._save(found["card"], target, name, found["hash"])
+            saved, skipped = self._save(found["card"], target, name, found["hash"], turn)
             return Result(path, status, cid, name, diff, margin, saved or "",
                           skipped or note, english)
         except Exception as exc:
@@ -440,13 +462,22 @@ class Cropper:
         started = time.time()
         workers = self.options.workers or min(8, max(2, (os.cpu_count() or 4)))
 
-        def run(path):
-            if should_stop and should_stop():
-                return None
-            return self.process_file(path)
+        with self._lock:
+            self._next_turn = 0
+            self._finished_turns.clear()
+
+        # 画像は入力の順にワーカーへ渡るので、待っている画像より前の画像は必ず処理中か処理済み
+        def run(turn, path):
+            try:
+                if should_stop and should_stop():
+                    return None
+                return self.process_file(path, turn)
+            finally:
+                with self._lock:
+                    self._finish_turn(turn)       # 保存しなかった画像も順番を回す
 
         with ThreadPoolExecutor(max_workers=workers) as pool:
-            for result in pool.map(run, files):
+            for result in pool.map(run, range(len(files)), files):
                 if result is None:
                     continue
                 summary.results.append(result)

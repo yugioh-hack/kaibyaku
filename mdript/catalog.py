@@ -237,8 +237,12 @@ class Catalog:
         if not coarse:
             distances = distances + _popcount(
                 self._lower ^ np.uint64(int(hex_hash[HEX_PER_REGION:], 16)))
+        # 近い256件（境目と同じ距離の行も全部）を取り、距離→行の順に並べる。
+        # argpartition だけだと同じ距離の行の並びが決まらず、要確認のカードIDが実行ごと・
+        # 実装ごとに変わりうる。行の順は同梱DB→利用者の追加分で、読み込んだ順のまま
         limit = min(distances.size, 256)
-        idx = np.argpartition(distances, limit - 1)[:limit]
+        kth = np.partition(distances, limit - 1)[limit - 1]
+        idx = np.flatnonzero(distances <= kth)
         idx = idx[np.argsort(distances[idx], kind="stable")]
         if center is not None and not coarse and self._ids[idx[0]] in SPECIAL_CIDS:
             out = self._rank_special(idx, distances, center(), top)

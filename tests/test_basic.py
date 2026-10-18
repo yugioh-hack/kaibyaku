@@ -478,6 +478,46 @@ class TestIdentify(unittest.TestCase):
         normal = self.catalog.hashes["1"][0]
         self.catalog.rank(normal, top=2, center=lambda: self.fail("中央は不要"))
 
+    def test_ties_are_ranked_in_row_order(self):
+        """同じ距離のカードは、DB の行の順に並ぶ（256件の境目をまたいでも同じ）。"""
+        same = self.catalog.hashes["1"][0]
+        cids = [str(1000 - i) for i in range(300)]          # 番号が大きい順に入れる
+        for cid in cids:
+            self.catalog.hashes[cid] = [same]
+        self.catalog._reindex()
+        ranked = self.catalog.rank(same, top=4)
+        self.assertEqual([c for _, c in ranked], ["1"] + cids[:3])
+        self.assertTrue(all(d == 0 for d, _ in ranked))
+
+    def test_saves_in_input_order_even_if_later_images_finish_first(self):
+        """並列で処理しても、_alt の番号と重複スキップは入力の順で決まる。"""
+        import time
+
+        from mdript.pipeline import SKIPPED_NOTE, Cropper, Options
+
+        class SlowFirst(Cropper):
+            def process_file(self, path, turn=None):
+                time.sleep(0.05 * (4 - (turn or 0)))         # 前の画像ほど遅く終わる
+                return super().process_file(path, turn)
+
+        with tempfile.TemporaryDirectory() as tmp:
+            files = []
+            for i in range(4):
+                files.append(os.path.join(tmp, f"shot{i}.png"))
+                fake_screenshot(seed=0).save(files[-1])
+            for keep in (True, False):
+                out = os.path.join(tmp, f"out_{keep}")
+                summary = SlowFirst(self.catalog, Options(
+                    output_dir=out, write_csv=False, workers=4,
+                    skip_duplicate=not keep)).process_files(files)
+                saved = [os.path.basename(r.saved_path) for r in summary.results]
+                if keep:
+                    self.assertEqual(saved, ["テストカード.webp", "テストカード_alt1.webp",
+                                             "テストカード_alt2.webp", "テストカード_alt3.webp"])
+                else:
+                    self.assertEqual(saved, ["テストカード.webp", "", "", ""])
+                    self.assertEqual([r.note for r in summary.results][1:], [SKIPPED_NOTE] * 3)
+
     def test_does_not_confirm_a_non_card_image(self):
         """カードではない画像を、確定として出力しないこと。"""
         from mdript.pipeline import CONFIRMED, Cropper, Options
