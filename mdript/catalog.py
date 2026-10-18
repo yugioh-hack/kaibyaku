@@ -30,6 +30,15 @@ HASH_FORMAT = 2          # 1=64bit 1領域 / 2=128bit 2領域
 SPECIAL_CIDS = frozenset({"5224", "5271", "5272", "5273", "5274"})
 HASH_HEX_CENTER = HASH_HEX + HEX_PER_REGION
 
+# 名前もイラストも同じで、枠の色（カードの種類）だけが違うカード。
+# イラストのハッシュでは見分けられないので、照合では1枚として扱い、
+# 確定したあとに枠の色で決める（pipeline.frame_kind）。ファイル名には種類を付ける。
+#   カードID: (枠の色, ファイル名に付ける種類)
+FRAME_TWINS = {
+    "4370": ("ritual", "儀式"),     # カオス・ソルジャー（儀式モンスター）
+    "19092": ("normal", "通常"),    # カオス・ソルジャー（通常モンスター）
+}
+
 
 def app_dir() -> str:
     """アプリ本体（exe 化された場合はその展開先）のディレクトリ。"""
@@ -192,6 +201,14 @@ class Catalog:
 
     def display_name(self, cid, english=False):
         """出力ファイル名に使うカード名。english=True なら英語名（無ければ日本語名）。"""
+        name = self._plain_name(cid, english)
+        twin = FRAME_TWINS.get(str(cid))
+        if twin and any(self._plain_name(other, english) == name
+                        for other in FRAME_TWINS if other != str(cid)):
+            name += f"（{twin[1]}）"              # 同じ名前の別カードと区別する
+        return name
+
+    def _plain_name(self, cid, english=False):
         info = self.names.get(str(cid))
         if english and info and isinstance(info.get("e"), str) and info["e"]:
             return info["e"]
@@ -243,6 +260,8 @@ class Catalog:
         return out
 
     def _name_key(self, cid):
+        if cid in FRAME_TWINS:                 # カード名を取得していなくても1枚として扱う
+            return ("twin",)
         info = self.names.get(cid)
         name = info.get("n") if isinstance(info, dict) else None
         return ("name", name) if isinstance(name, str) and name else ("cid", cid)

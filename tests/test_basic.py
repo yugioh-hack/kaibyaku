@@ -352,6 +352,30 @@ class TestIdentify(unittest.TestCase):
         self.assertGreater(found["margin"], 0)
         self.assertTrue(Cropper.is_confirmed(found))
 
+    def test_frame_twins_are_told_apart_by_the_frame_color(self):
+        """カオス・ソルジャーは儀式（青い枠）と通常（黄色い枠）を枠の色で分け、名前に種類を付ける。"""
+        from PIL import ImageDraw
+        from mdript.pipeline import FRAME_BOX_RATIO, Cropper, Options
+        self.catalog.hashes["19092"] = self.catalog.hashes.pop("1")
+        self.catalog.names = {"19092": {"n": "カオス・ソルジャー"}, "4370": {"n": "カオス・ソルジャー"}}
+        self.catalog._reindex()
+        shot = fake_screenshot(seed=0)
+        l, t, r, b = predict_card_box(shot.size)
+        w, h = r - l, b - t
+        fl, ft, fr, fb = FRAME_BOX_RATIO
+        frame = (l + int(w * fl), t + int(h * ft), l + int(w * fr), t + int(h * fb))
+        with tempfile.TemporaryDirectory() as tmp:
+            for color, cid, name in (((113, 138, 191), "4370", "カオス・ソルジャー（儀式）"),
+                                     ((200, 167, 106), "19092", "カオス・ソルジャー（通常）")):
+                img = shot.copy()
+                ImageDraw.Draw(img).rectangle(frame, fill=color)
+                path = os.path.join(tmp, f"{cid}.png")
+                img.save(path)
+                result = Cropper(self.catalog, Options(output_dir=os.path.join(tmp, "out"),
+                                                       write_csv=False)).process_file(path)
+                self.assertEqual((result.card_id, result.name), (cid, name))
+                self.assertTrue(os.path.exists(result.saved_path))
+
     def test_add_hash_teaches_a_card_with_a_different_crop(self):
         """マスター画像と描画が違うカードも、MD 版のハッシュを足せば確定する。"""
         from mdript.pipeline import Cropper

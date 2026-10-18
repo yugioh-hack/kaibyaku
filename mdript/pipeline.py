@@ -12,7 +12,7 @@ from dataclasses import dataclass, field
 
 from PIL import Image, ImageDraw
 
-from .catalog import Catalog
+from .catalog import FRAME_TWINS, Catalog
 from .language import is_english
 from .layout import (COARSE_SCALES, COARSE_SHIFTS, CORNER_RADIUS_RATIO, ESTIMATED,
                      FINE_SCALES, FINE_SHIFTS, TRUSTED, box_is_on_card_edges, card_boxes,
@@ -138,6 +138,26 @@ def rounded_alpha(card: Image.Image) -> Image.Image:
                                            radius=radius, fill=255)
     card.putalpha(mask)
     return card
+
+
+# 枠の色を見る場所（カード画像に対する比率）。左の枠の、イラストの横あたり
+FRAME_BOX_RATIO = (0.04, 0.30, 0.08, 0.60)
+FRAME_COLOR_GAP = 40        # 青と赤の差がこれ以上なら、その色の枠とみなす
+
+
+def frame_kind(card: Image.Image):
+    """カードの枠の色。儀式（青）なら "ritual"、通常モンスター（黄）なら "normal"、
+    どちらでもなければ None。実測: 儀式 RGB(113,138,191)、通常 RGB(200,167,106)。"""
+    w, h = card.size
+    l, t, r, b = FRAME_BOX_RATIO
+    region = card.convert("RGB").crop((int(w * l), int(h * t), int(w * r), int(h * b)))
+    pixels = list(region.resize((1, 1), Image.BOX).getdata())[0]
+    red, _, blue = pixels
+    if blue - red >= FRAME_COLOR_GAP:
+        return "ritual"
+    if red - blue >= FRAME_COLOR_GAP:
+        return "normal"
+    return None
 
 
 def collect_images(paths, recursive=True, exclude=None):
@@ -337,7 +357,7 @@ class Cropper:
                 return Result(path, NOT_CARD, note="照合できる画像がありません")
 
             diff, margin = found["distance"], found["margin"]
-            cid = found["card_id"]
+            cid = found["card_id"] = self._resolve_frame_twin(found)
             english, name, note = False, self.catalog.display_name(cid), ""
             if diff <= REVIEW_DIFF and self._is_english(found):
                 english = True
@@ -372,6 +392,15 @@ class Cropper:
                           skipped or note, english)
         except Exception as exc:
             return Result(path, ERROR, note=f"{type(exc).__name__}: {exc}")
+
+    @staticmethod
+    def _resolve_frame_twin(found):
+        """名前もイラストも同じカード（カオス・ソルジャー）は、枠の色でどちらかに決める。"""
+        cid = found["card_id"]
+        if cid not in FRAME_TWINS:
+            return cid
+        kind = frame_kind(found["card"])
+        return next((c for c, (k, _) in FRAME_TWINS.items() if k == kind), cid)
 
     def _is_english(self, found):
         return self.options.english != "off" and is_english(found["card"])
