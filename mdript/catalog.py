@@ -230,13 +230,22 @@ class Catalog:
         out, seen = [], set()
         for i in idx:
             cid = self._ids[i]
-            if cid in seen:
+            # 同じ名前の別カード（カオス・ソルジャーの 4370 と 19092 は絵も同じ）は、
+            # どちらに当たっても同じファイル名になるので1枚として数える。
+            # 別々に数えると2位との差が0になり、確定できなくなる
+            key = self._name_key(cid)
+            if key in seen:
                 continue
-            seen.add(cid)
+            seen.add(key)
             out.append((int(distances[i]), cid))
             if len(out) >= top:
                 break
         return out
+
+    def _name_key(self, cid):
+        info = self.names.get(cid)
+        name = info.get("n") if isinstance(info, dict) else None
+        return ("name", name) if isinstance(name, str) and name else ("cid", cid)
 
     def _rank_special(self, idx, distances, center_hex, top):
         """ウィジャ盤・死のメッセージの間の順位を、中央の領域も足して決め直す。

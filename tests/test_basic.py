@@ -340,6 +340,18 @@ class TestIdentify(unittest.TestCase):
                 self.assertEqual(sorted(os.path.relpath(r.saved_path, out)
                                         for r in summary.results), files)
 
+    def test_cards_with_the_same_name_count_as_one(self):
+        """同じ名前・同じ絵の別カード（カオス・ソルジャーの 4370 と 19092）で確定できなくならない。"""
+        from mdript.pipeline import Cropper
+        self.catalog.hashes["7"] = list(self.catalog.hashes["1"])      # 1 番と同じ絵
+        self.catalog._reindex()
+        found = Cropper(self.catalog).identify(fake_screenshot(seed=0))
+        self.assertEqual(found["margin"], 0)                         # 名前が違えば決められない
+        self.catalog.names["7"] = {"n": "テストカード"}                  # 1 番と同じ名前
+        found = Cropper(self.catalog).identify(fake_screenshot(seed=0))
+        self.assertGreater(found["margin"], 0)
+        self.assertTrue(Cropper.is_confirmed(found))
+
     def test_add_hash_teaches_a_card_with_a_different_crop(self):
         """マスター画像と描画が違うカードも、MD 版のハッシュを足せば確定する。"""
         from mdript.pipeline import Cropper

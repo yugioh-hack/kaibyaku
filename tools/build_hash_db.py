@@ -38,6 +38,11 @@ from mdript.catalog import SPECIAL_CIDS  # noqa: E402
 from mdript.phash import ART_BOXES, HASH_HEX, HASH_SIZE, artwork_phash_hex, hamming  # noqa: E402
 
 EN_MIN_DISTANCE = 12   # 英語版の画像を既存のハッシュに足す、最小の距離（実測で決めた値。README 参照）
+# 英語版の画像のハッシュが、別のカードのハッシュにこれより近ければ足さない。
+# 同じ名前・同じ絵の別カード（カオス・ソルジャーの 4370 と 19092 は距離0）に足すと、
+# 1位と2位の差が無くなり、今まで確定していたカードが要確認に落ちるため。
+# ウィジャ盤・死のメッセージの5枚どうしは中央の領域で見分けるので、この確認から外す。
+EN_MIN_OTHER_DISTANCE = 20
 
 EXTS = (".jpg", ".jpeg", ".png", ".webp")
 _VARIANT = re.compile(r"(?:_alt\d+|_\d+| \(\d+\))+$")
@@ -111,6 +116,8 @@ def main():
                     help="英語版だけのカードのJSON（yugioh_cards_en_only.json）。画像の抜けの確認に使う")
     ap.add_argument("--en-min-distance", type=int, default=EN_MIN_DISTANCE,
                     help="英語版の画像を、同じカードの既存のハッシュに足す最小の距離（これ未満は足さない）")
+    ap.add_argument("--en-min-other-distance", type=int, default=EN_MIN_OTHER_DISTANCE,
+                    help="英語版の画像は、別のカードのハッシュとこの距離未満なら足さない（既定 20）")
     ap.add_argument("--base", help="このハッシュDBに足す（入っているハッシュは消さない）")
     ap.add_argument("--out", default="data/card_hashes.json")
     ap.add_argument("--workers", type=int, default=0)
@@ -186,7 +193,15 @@ def main():
         # （キャッシュはファイル名で引くので、日本語版の画像と混ぜないよう使わない）
         files = list_images(args.master_dir_en)
         print(f"英語版の画像: {len(files)} 枚")
-        en_cids, skipped, added_ja, dists = set(), 0, 0, []
+        en_cids, skipped, added_ja, dists, too_close = set(), 0, 0, [], []
+
+        def nearest_other(cid, h):
+            """別のカード（ウィジャ盤の5枚どうしは除く）のハッシュまでの最小距離。"""
+            family = SPECIAL_CIDS if cid in SPECIAL_CIDS else {cid}
+            v = int(h[:HASH_HEX], 16)
+            return min((bin(v ^ int(x[:HASH_HEX], 16)).count("1")
+                        for c, xs in hashes.items() if c not in family for x in xs), default=999)
+
         for fname, h in sorted(hash_files(files, workers).items(), key=lambda kv: (stem_to_cid(kv[0]) or "", kv[0])):
             cid = stem_to_cid(fname)
             if not cid:
@@ -200,12 +215,19 @@ def main():
                 if d < args.en_min_distance:
                     skipped += 1
                     continue
+            other = nearest_other(cid, h)
+            if other < args.en_min_other_distance:
+                too_close.append(f"{fname}（別のカードとの距離 {other}）")
+                continue
+            if cid in hashes:
                 added_ja += 1
                 print(f"  描き変え候補: {fname} 既存との距離 {d}")
             add(cid, fname, h)
             en_cids.add(cid)
         print(f"英語版の画像から追加したカード: {len(en_cids)} 種（うち既存のカードに別の絵を足したもの {added_ja} 種のハッシュ）、"
               f"既存と近いので足さなかった画像 {skipped} 枚")
+        if too_close:
+            print(f"  別のカードと近いので足さなかった画像 {len(too_close)} 枚: " + "、".join(too_close))
         if dists:
             hist = collections.Counter(min(d // 4 * 4, 40) for d in dists)
             print("  既存のカードとの距離の分布: " + " ".join(
