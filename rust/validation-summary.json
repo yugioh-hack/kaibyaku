@@ -1,0 +1,23 @@
+{
+  "images": 256,
+  "cases": 768,
+  "results": {
+    "native_decode": {
+      "matches": 739,
+      "total": 768
+    },
+    "same_pixels": {
+      "matches": 768,
+      "total": 768
+    }
+  },
+  "date": "2026-10-21",
+  "python": "3.14.7",
+  "pillow": "12.2.0",
+  "numpy": "2.4.5",
+  "rust": "1.99.0",
+  "image": "0.25.10",
+  "native_mismatch_images": 13,
+  "max_hash_distance": 2,
+  "scope": "hash and predicted box only; not identification or speed"
+}
