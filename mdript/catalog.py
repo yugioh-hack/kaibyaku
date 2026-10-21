@@ -76,6 +76,10 @@ def _hex_list(value):
             and all(c in "0123456789abcdef" for c in h)]
 
 
+def _dict(value):
+    return value if isinstance(value, dict) else {}
+
+
 def _write_json(path, data):
     tmp = path + ".tmp"
     with open(tmp, "w", encoding="utf-8") as f:
@@ -103,16 +107,17 @@ class Catalog:
     def load(self):
         self.hashes = {}
         bundled = _read_json(os.path.join(bundled_data_dir(), BUNDLED_HASHES)) or {}
-        for cid, hexes in (bundled.get("hashes") or {}).items():
+        for cid, hexes in _dict(bundled.get("hashes")).items():
             self.hashes[cid] = _hex_list(hexes)
         self.bundled_count = len(self.hashes)
 
         user = _read_json(os.path.join(user_data_dir(), USER_HASHES)) or {}
         added = 0
-        if (user.get("meta") or {}).get("format") == HASH_FORMAT:
-            packs = (user.get("meta") or {}).get("packs")
+        meta = _dict(user.get("meta"))
+        if meta.get("format") == HASH_FORMAT:
+            packs = meta.get("packs")
             self.known_packs = {p for p in packs if isinstance(p, str)} if isinstance(packs, list) else set()
-            for cid, hexes in (user.get("hashes") or {}).items():
+            for cid, hexes in _dict(user.get("hashes")).items():
                 cur = self.hashes.setdefault(cid, [])
                 for h in _hex_list(hexes):
                     if h not in cur:
@@ -125,8 +130,10 @@ class Catalog:
 
         names = _read_json(os.path.join(user_data_dir(), USER_NAMES)) or {}
         cards = names.get("cards")
-        self.names = {k: v for k, v in cards.items() if isinstance(v, dict)}             if isinstance(cards, dict) else {}
-        self.names_fetched = (names.get("meta") or {}).get("fetched", "")
+        self.names = {k: {field: value for field, value in v.items() if isinstance(value, str)}
+                      for k, v in _dict(cards).items() if isinstance(v, dict)}
+        fetched = _dict(names.get("meta")).get("fetched", "")
+        self.names_fetched = fetched if isinstance(fetched, str) else ""
         self._reindex()
 
     def _reindex(self):
@@ -169,7 +176,7 @@ class Catalog:
     # ---------- 保存 ----------
     def save_user_hashes(self):
         bundled = _read_json(os.path.join(bundled_data_dir(), BUNDLED_HASHES)) or {}
-        base = bundled.get("hashes") or {}
+        base = _dict(bundled.get("hashes"))
         extra = {}
         for cid, hexes in self.hashes.items():
             diff = [h for h in hexes if h not in base.get(cid, [])]
@@ -313,7 +320,12 @@ else:                                    # numpy < 2.0 向けの手計算
 
 # ---------- 設定 ----------
 def load_config():
-    return _read_json(os.path.join(user_data_dir(), CONFIG_FILE)) or {}
+    cfg = _read_json(os.path.join(user_data_dir(), CONFIG_FILE)) or {}
+    types = {"output_dir": str, "resolution": str, "save_format": str,
+             "english": str, "split": str, "rounded": bool, "recursive": bool,
+             "skip_duplicate": bool, "save_review": bool, "save_not_card": bool,
+             "asked_names": bool}
+    return {k: v for k, v in cfg.items() if k in types and type(v) is types[k]}
 
 
 def save_config(cfg):

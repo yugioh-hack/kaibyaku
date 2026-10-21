@@ -350,7 +350,7 @@ def update_new_sets(catalog, cards, progress=None, should_stop=None, max_cards=4
 
     # --- 新しいシリーズに入っているカードのイラストを取り直す ---
     missing = set(missing)
-    todo, seen_packs = [], set()
+    todo, seen_packs, pack_members = [], set(), {}
     for pack in new_packs:
         if should_stop and should_stop():
             raise Cancelled()
@@ -359,7 +359,10 @@ def update_new_sets(catalog, cards, progress=None, should_stop=None, max_cards=4
         except Exception:
             continue
         time.sleep(REQUEST_INTERVAL)
+        if not pack_cids:                 # メンテナンス画面などを取り込み完了とみなさない
+            continue
         seen_packs.add(pack["pid"])
+        pack_members[pack["pid"]] = set(pack_cids)
         if pack.get("name"):
             result["pack_names"].append(pack["name"])
         todo += [cid for cid in pack_cids if cid not in missing]
@@ -375,7 +378,8 @@ def update_new_sets(catalog, cards, progress=None, should_stop=None, max_cards=4
         result["refreshed"] = done
         result["new_hashes"] += new_hashes
         result["failed"] += failed
-        catalog.known_packs |= seen_packs
-    else:
-        catalog.known_packs |= seen_packs
+    if len(todo) <= max_cards:
+        failed_cids = set(result["failed"])
+        catalog.known_packs |= {pid for pid in seen_packs
+                                if not (pack_members[pid] & failed_cids)}
     return result

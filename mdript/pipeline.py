@@ -20,6 +20,7 @@ from .layout import (COARSE_SCALES, COARSE_SHIFTS, CORNER_RADIUS_RATIO, ESTIMATE
 from .phash import artwork_phash_hex, center_phash_hex, hamming
 
 IMAGE_EXTS = (".png", ".jpg", ".jpeg", ".webp", ".bmp")
+MAX_CARD_PIXELS = 16_000_000       # 8K のカード領域まで。想定外の枠で巨大な画像を作らない
 
 # ハッシュ距離のしきい値（128bit / 上下2領域の pHash）。
 #
@@ -197,6 +198,7 @@ class Cropper:
         self.options = options or Options()
         self._lock = threading.Lock()
         self._saved = {}               # 出力パス -> ハッシュ（同時保存の衝突回避）
+        self._pending = set()           # 予約済みだが、書き込みが完了していないパス
         # まとめて処理するときは、保存名の予約（_alt の番号・重複スキップ）を入力の順に行う。
         # 並列で処理しても、どの画像が _alt1 になるか・スキップされるかを毎回同じにするため
         self._turn = threading.Condition(self._lock)
@@ -210,9 +212,12 @@ class Cropper:
         coarse=True では上側64bitだけで採点する。枠がずれているほど
         ビット数の多いハッシュは当たらなくなるため、枠を探す段階で使う。
         """
-        card = img.crop(box)
-        if card.size[0] < 40 or card.size[1] < 40:
+        left, top, right, bottom = box
+        if (left < 0 or top < 0 or right > img.width or bottom > img.height
+                or right - left < 40 or bottom - top < 40
+                or (right - left) * (bottom - top) > MAX_CARD_PIXELS):
             return None
+        card = img.crop(box)
         hex_hash = artwork_phash_hex(card, coarse=coarse)
         ranked = self.catalog.rank(hex_hash, top=2, coarse=coarse,
                                    center=lambda: center_phash_hex(card))
@@ -308,7 +313,7 @@ class Cropper:
                 or (diff <= CONFIRM_DIFF_WIDE and margin >= CONFIRM_MARGIN_WIDE))
 
     # ---------- 保存 ----------
-    def _save(self, card, target_dir, name, hex_hash, turn=None):
+    def _save(self, card, target_dir, name, hex_hash, turn=None, *, rounded=None):
         """turn は入力の中での順番。指定すると、それより前の画像の予約が済むまで待つ。"""
         os.makedirs(target_dir, exist_ok=True)
         exts = _EXTS_BY_FORMAT.get(self.options.save_format, (".webp",))
@@ -321,11 +326,29 @@ class Cropper:
                 index = 1
                 while True:
                     # both のときは .webp と .png のどちらかが使われていれば別名にする
-                    taken = [stem + ext for ext in exts
-                             if stem + ext in self._saved or os.path.exists(stem + ext)]
+                    paths = [stem + ext for ext in exts]
+                    taken = [path for path in paths if os.path.exists(path)]
+                    if any(path in self._pending for path in paths):
+                        # 保存失敗なら後続の画像が代わりに保存できるよう、完了を待って判定する。
+                        self._turn.wait_for(lambda: not any(p in self._pending for p in paths))
+                        continue
                     if not taken:
-                        break
-                    if self.options.skip_duplicate:
+                        created = []
+                        try:
+                            # インスタンス・プロセスをまたぐ競合も排他的作成で防ぐ。
+                            for path in paths:
+                                with open(path, "xb"):
+                                    pass
+                                created.append(path)
+                        except BaseException as exc:
+                            for path in created:
+                                os.remove(path)
+                            if not isinstance(exc, FileExistsError):
+                                raise
+                        else:
+                            self._pending.update(paths)
+                            break
+                    if self.options.skip_duplicate and hex_hash:
                         for path in taken:
                             other = self._saved.get(path)
                             if other is None:
@@ -335,15 +358,31 @@ class Cropper:
                                 return None, SKIPPED_NOTE
                     stem = os.path.join(target_dir, f"{base}_alt{index}")
                     index += 1
-                for ext in exts:
-                    self._saved[stem + ext] = hex_hash
             finally:
                 if turn is not None:
                     self._finish_turn(turn)       # 書き出しは待たずに次の画像へ順番を回す
 
-        image = rounded_alpha(card) if self.options.rounded else card.convert("RGB")
-        for ext in exts:
-            self._encode(image, stem + ext, ext)
+        try:
+            use_rounded = self.options.rounded if rounded is None else rounded
+            image = rounded_alpha(card) if use_rounded else card.convert("RGB")
+            for ext in exts:
+                self._encode(image, stem + ext, ext)
+        except BaseException:
+            # 自分で予約したファイルだけを消し、壊れた画像や both の片方を残さない。
+            for path in paths:
+                try:
+                    os.remove(path)
+                except FileNotFoundError:
+                    pass
+            raise
+        else:
+            with self._lock:
+                for path in paths:
+                    self._saved[path] = hex_hash or ""
+        finally:
+            with self._lock:
+                self._pending.difference_update(paths)
+                self._turn.notify_all()
         return stem + exts[0], ""
 
     def _finish_turn(self, turn):
@@ -376,7 +415,14 @@ class Cropper:
                 img = raw.convert("RGB")
             found = self.identify(img)
             if not found:
-                return Result(path, NOT_CARD, note="照合できる画像がありません")
+                saved = ""
+                if self.options.save_not_card:
+                    stem = os.path.splitext(os.path.basename(path))[0]
+                    saved, _ = self._save(
+                        img, os.path.join(self.options.output_dir, self.options.not_card_subdir),
+                        stem, None, turn, rounded=False)
+                return Result(path, NOT_CARD, saved_path=saved,
+                              note="照合できる画像がありません")
 
             diff, margin = found["distance"], found["margin"]
             cid = found["card_id"] = self._resolve_frame_twin(found)

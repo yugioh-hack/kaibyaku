@@ -74,8 +74,9 @@ def detect_card_box(img: Image.Image, work_width=640, aspect_tol=ASPECT_TOLERANC
     w, h = img.size
     if w < 16 or h < 16:                # 輪郭を測れないほど小さい
         return None
-    sw = min(work_width, w)
-    sh = max(64, int(round(h * sw / w)))
+    scale = min(1.0, work_width / w, work_width / h)
+    sw = max(2, int(round(w * scale)))
+    sh = max(2, int(round(h * scale)))
     gray = np.asarray(img.convert("L").resize((sw, sh), Image.BILINEAR), dtype=np.float32)
     gx = np.abs(np.diff(gray, axis=1)).sum(axis=0)     # 列ごとの縦線の強さ
     gy = np.abs(np.diff(gray, axis=0)).sum(axis=1)     # 行ごとの横線の強さ
