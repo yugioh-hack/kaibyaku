@@ -1,0 +1,64 @@
+{
+  "kind": "synthetic single-thread in-memory stage microbenchmark",
+  "python": "3.12.14",
+  "pillow": "12.3.0",
+  "numpy": "2.3.5",
+  "hash_count": 15069,
+  "samples_per_stage": 15,
+  "rows": [
+    {
+      "resolution": [
+        1920,
+        1080
+      ],
+      "median_ms": {
+        "png_decode_rgb": 55.245,
+        "crop": 0.784,
+        "phash_128": 0.413,
+        "rank": 0.123,
+        "language": 1.214,
+        "rounded_alpha": 1.289,
+        "webp_encode": 129.691,
+        "png_encode": 88.093
+      },
+      "sum_webp_stages_ms": 188.759,
+      "upper_bound_same_decode_encode": 1.021
+    },
+    {
+      "resolution": [
+        2560,
+        1440
+      ],
+      "median_ms": {
+        "png_decode_rgb": 121.572,
+        "crop": 1.765,
+        "phash_128": 0.625,
+        "rank": 0.113,
+        "language": 2.333,
+        "rounded_alpha": 4.052,
+        "webp_encode": 206.077,
+        "png_encode": 137.556
+      },
+      "sum_webp_stages_ms": 336.537,
+      "upper_bound_same_decode_encode": 1.027
+    },
+    {
+      "resolution": [
+        3840,
+        2160
+      ],
+      "median_ms": {
+        "png_decode_rgb": 192.366,
+        "crop": 3.169,
+        "phash_128": 1.968,
+        "rank": 0.113,
+        "language": 6.139,
+        "rounded_alpha": 8.127,
+        "webp_encode": 444.877,
+        "png_encode": 239.6
+      },
+      "sum_webp_stages_ms": 656.759,
+      "upper_bound_same_decode_encode": 1.031
+    }
+  ]
+}
