@@ -107,27 +107,7 @@ pub(crate) fn save_hashes_checked(
         let _ = fs::remove_file(&temporary);
         return Err(error);
     }
-    if let Err(error) = fs::rename(&temporary, path) {
-        #[cfg(windows)]
-        {
-            // Windows rename does not replace an existing destination.
-            use std::os::windows::ffi::OsStrExt;
-            unsafe extern "system" {
-                fn MoveFileExW(old: *const u16, new: *const u16, flags: u32) -> i32;
-            }
-            let from: Vec<u16> = temporary.as_os_str().encode_wide().chain([0]).collect();
-            let to: Vec<u16> = path.as_os_str().encode_wide().chain([0]).collect();
-            // MOVEFILE_REPLACE_EXISTING; remains atomic on the same volume.
-            if unsafe { MoveFileExW(from.as_ptr(), to.as_ptr(), 1) } == 0 {
-                return Err(std::io::Error::last_os_error().to_string());
-            }
-        }
-        #[cfg(not(windows))]
-        return Err(error.to_string());
-        #[cfg(windows)]
-        let _ = error;
-    }
-    Ok(())
+    fs::rename(&temporary, path).map_err(|e| e.to_string())
 }
 
 fn learn(cid: &str, image: &Path, user_dir: &Path) -> Result<Value, String> {

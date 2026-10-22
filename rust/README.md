@@ -40,7 +40,9 @@ rust/target/release/mdript-cli.exe update-names --user-data C:/tmp/mdript-rust-u
 rust/target/release/mdript-cli.exe update-hashes --user-data C:/tmp/mdript-rust-user
 ```
 
-初回は公式DBの収録シリーズ一覧を取り込み済みとして記録し、未登録カードだけを取得します。次回以降は新しいシリーズ内の再録カードも確認します。`--max-cards N`は再録の上限（既定4000）です。`--verify-pack PID`は1シリーズだけの限定検証用で、通常の更新では使いません。画像は既存のローカル入力と同じ復号上限に加え、縦横とも4000画素以下に制限します。Ctrl+Cを受けると取得を止め、ハッシュDBを書き換えません。
+初回は公式DBの収録シリーズ一覧を取り込み済みとして記録し、未登録カードだけを取得します。次回以降は新しいシリーズ内の再録カードも確認します。`--max-cards N`は再録の上限（既定4000）です。`--verify-pack PID`は1シリーズだけの限定検証用で、通常の更新では使いません。画像は既存のローカル入力と同じ復号上限に加え、幅×高さが4000×4000画素以下に制限します。Ctrl+Cを受けると取得を止め、ハッシュDBを書き換えません。
+
+初回に取り込み済みとしたシリーズは、未登録カードのページで同じIDが見つかっても再取得しません。初回・新カード・再録・一覧取得失敗・件数上限の固定データ5分岐はPython版の結果と一致しました。中断時は残りのカードを失敗件数に加えず、既存のハッシュDBを保持します。書き込みを伴う3コマンドの`--user-data`は、親ディレクトリとジャンクションを解決し、Windowsでは大文字小文字を区別せず`%APPDATA%/mdript`との重なりを拒否します。保存は一時ファイルから標準の`fs::rename`で置き換えます。
 
 HTTPには`ureq 3.4.2`のRustls・gzip既定構成を使います。同期型で依存が比較的小さく、TLSのためのCMake・NASMを必要としません。公式ホストのHTTPS以外とその外へのリダイレクトを拒否し、展開後32MiBの応答上限、1要求ごと0.4秒以上の間隔、最大3回の再試行を設けています。取得が完了してから一時ファイルを置き換えるため、中断で一部だけのカード名を保存しません。
 
@@ -65,7 +67,7 @@ cargo clippy --manifest-path rust/Cargo.toml --workspace --all-targets --locked 
 cargo fmt --manifest-path rust/Cargo.toml --all --check
 ```
 
-Rustの41テストと`cargo fmt --all --check`、`cargo clippy --workspace --all-targets --locked -- -D warnings`は通過。panicを差し込むテストは子プロセスに10秒の制限を設け、判定・保存・mutex poison後も後続の画像とJSONが返ることを確認します。既存のPython版75テストも移植前の検証で通過しています。独立レビュー用の`tools/review_reference.py`、`review_compare.py`、`review_scenarios.py`、`review_safety.py`で次を再確認しました。
+Rustの45テストと`cargo fmt --all --check`、`cargo clippy --workspace --all-targets --locked -- -D warnings`は通過。panicを差し込むテストは子プロセスに10秒の制限を設け、判定・保存・mutex poison後も後続の画像とJSONが返ることを確認します。既存のPython版75テストも移植前の検証で通過しています。独立レビュー用の`tools/review_reference.py`、`review_compare.py`、`review_scenarios.py`、`review_safety.py`で次を再確認しました。
 
 - 実スクリーンショット256枚: 状態・カードID・名前・言語・備考は全件一致。距離か2位との差だけ8枚で不一致（最大4）。主因はJPEGデコードの画素差。全件の厳密一致判定は248/256。
 - JPEG差の境界分析: 距離16から3以内の画像は140枚ですが、確定判定を変える距離32・差4などの境界から3以内は0枚。状態変更までの最小変化量は5で、元画像256件と720p・JPEG50・ウィンドウ模擬12件に状態の入れ替わりはありません。全画像の値と境界距離は`rust/jpeg-boundary-report.json`、一覧と解釈は`docs/rust-prototype-decision.md`に記録しています。

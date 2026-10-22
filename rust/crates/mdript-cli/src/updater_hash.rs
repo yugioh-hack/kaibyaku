@@ -14,7 +14,7 @@ use std::{
     path::PathBuf,
 };
 
-const MAX_IMAGE_SIDE: u32 = 4000;
+const MAX_IMAGE_PIXELS: u64 = 4000 * 4000;
 const SPECIAL: [&str; 5] = ["5224", "5271", "5272", "5273", "5274"];
 
 fn re(source: &str) -> Regex {
@@ -97,12 +97,11 @@ fn fetch_card_page(
             .with_guessed_format()
             .ok()
             .and_then(|reader| reader.into_dimensions().ok());
-        if dimensions.is_none_or(|(w, h)| w > MAX_IMAGE_SIDE || h > MAX_IMAGE_SIDE) {
+        if dimensions.is_none_or(|(w, h)| u64::from(w) * u64::from(h) > MAX_IMAGE_PIXELS) {
             continue;
         }
         if let Ok(image) = load_rgb_bytes(&raw)
-            && image.width() <= MAX_IMAGE_SIDE
-            && image.height() <= MAX_IMAGE_SIDE
+            && u64::from(image.width()) * u64::from(image.height()) <= MAX_IMAGE_PIXELS
         {
             images.push(image);
         }
@@ -134,9 +133,11 @@ fn update_hashes(
     hashes: &mut Map<String, Value>,
     cids: &[String],
     english_only: &HashSet<String>,
-) -> HashProgress {
+    check: &impl Fn() -> Result<(), String>,
+) -> Result<HashProgress, String> {
     let mut progress = HashProgress::default();
     for cid in cids {
+        check()?;
         let page = if english_only.contains(cid) {
             fetch_card_page(fetch, cid, "en")
         } else {
@@ -147,6 +148,7 @@ fn update_hashes(
                 other => other,
             }
         };
+        check()?;
         let Ok((images, packs)) = page else {
             progress.failed.push(cid.clone());
             continue;
@@ -181,7 +183,7 @@ fn update_hashes(
         }
         progress.done += 1;
     }
-    progress
+    Ok(progress)
 }
 
 fn update_new_sets(
@@ -190,10 +192,13 @@ fn update_new_sets(
     known_packs: &mut Vec<String>,
     cards: &Map<String, Value>,
     max_cards: usize,
-) -> Value {
+    check: &impl Fn() -> Result<(), String>,
+) -> Result<Value, String> {
+    check()?;
     let mut result = json!({"new_cards":0,"new_hashes":0,"packs":0,"refreshed":0,
         "failed":[],"skipped_packs":[],"seeded":0,"pack_names":[],"pack_list_failed":false});
     let all_packs = fetch_pack_list(fetch).unwrap_or_default();
+    check()?;
     let already_known: HashSet<_> = known_packs.iter().cloned().collect();
     let mut new_packs = if all_packs.is_empty() {
         result["pack_list_failed"] = json!(true);
@@ -222,7 +227,7 @@ fn update_new_sets(
     // First-run seeding may have changed known_packs above.
     let known: HashSet<_> = known_packs.iter().cloned().collect();
     if !missing.is_empty() {
-        let progress = update_hashes(fetch, hashes, &missing, &english_only);
+        let progress = update_hashes(fetch, hashes, &missing, &english_only, check)?;
         result["new_cards"] = json!(progress.done);
         result["new_hashes"] = json!(progress.added);
         result["failed"] = json!(progress.failed);
@@ -249,9 +254,11 @@ fn update_new_sets(
     let mut seen_cards = HashSet::new();
     let mut pack_members = HashMap::new();
     for pack in new_packs {
+        check()?;
         let Ok(members) = fetch_pack_cards(fetch, &pack.pid) else {
             continue;
         };
+        check()?;
         if members.is_empty() {
             continue;
         }
@@ -275,7 +282,7 @@ fn update_new_sets(
         result["skipped_packs"] = json!(skipped);
     } else {
         if !todo.is_empty() {
-            let progress = update_hashes(fetch, hashes, &todo, &HashSet::new());
+            let progress = update_hashes(fetch, hashes, &todo, &HashSet::new(), check)?;
             result["refreshed"] = json!(progress.done);
             result["new_hashes"] =
                 json!(result["new_hashes"].as_u64().unwrap_or(0) + progress.added as u64);
@@ -298,7 +305,8 @@ fn update_new_sets(
         known_packs.sort();
         known_packs.dedup();
     }
-    result
+    check()?;
+    Ok(result)
 }
 
 pub fn run(args: Vec<OsString>) -> Result<(), String> {
@@ -344,11 +352,24 @@ pub fn run(args: Vec<OsString>) -> Result<(), String> {
     let result = if let Some(pid) = verify_pack {
         let members = fetch_pack_cards(&mut fetch, &pid)?;
         let english_only = HashSet::new();
-        let progress = update_hashes(&mut fetch, &mut hashes, &members, &english_only);
+        let progress = update_hashes(
+            &mut fetch,
+            &mut hashes,
+            &members,
+            &english_only,
+            &check_cancelled,
+        )?;
         json!({"pack":pid,"members":members.len(),"cards":progress.done,
             "new_hashes":progress.added,"failed":progress.failed})
     } else {
-        update_new_sets(&mut fetch, &mut hashes, &mut packs, cards, max_cards)
+        update_new_sets(
+            &mut fetch,
+            &mut hashes,
+            &mut packs,
+            cards,
+            max_cards,
+            &check_cancelled,
+        )?
     };
     check_cancelled()?;
     save_hashes_checked(&user_file, &hashes, &packs, check_cancelled)?;
@@ -360,7 +381,7 @@ pub fn run(args: Vec<OsString>) -> Result<(), String> {
 mod tests {
     use super::*;
     use image::{DynamicImage, ImageFormat, Rgb, RgbImage};
-    use std::io::Cursor;
+    use std::{cell::Cell, fs, io::Cursor};
 
     struct Fixture {
         pages: HashMap<String, Vec<u8>>,
@@ -411,7 +432,15 @@ mod tests {
             Map::from_iter([("4138".into(), json!(["00000000000000000000000000000000"]))]);
         let mut packs = vec!["10".into()];
         let cards = Map::from_iter([("4138".into(), json!({"n":"sample","r":""}))]);
-        let result = update_new_sets(&mut fixture(), &mut hashes, &mut packs, &cards, 4000);
+        let result = update_new_sets(
+            &mut fixture(),
+            &mut hashes,
+            &mut packs,
+            &cards,
+            4000,
+            &|| Ok(()),
+        )
+        .unwrap();
         assert_eq!(result["packs"], 1);
         assert_eq!(result["refreshed"], 1);
         assert_eq!(result["new_hashes"], 1);
@@ -424,7 +453,15 @@ mod tests {
             Map::from_iter([("4138".into(), json!(["00000000000000000000000000000000"]))]);
         let mut packs = Vec::new();
         let cards = Map::from_iter([("4138".into(), json!({"n":"sample","r":""}))]);
-        let result = update_new_sets(&mut fixture(), &mut hashes, &mut packs, &cards, 4000);
+        let result = update_new_sets(
+            &mut fixture(),
+            &mut hashes,
+            &mut packs,
+            &cards,
+            4000,
+            &|| Ok(()),
+        )
+        .unwrap();
         assert_eq!(result["seeded"], 1);
         assert_eq!(result["refreshed"], 0);
         assert_eq!(packs, vec!["11"]);
@@ -477,7 +514,15 @@ mod tests {
             } else {
                 4000
             };
-            let result = update_new_sets(&mut fetch, &mut hashes, &mut packs, &cards, max_cards);
+            let result = update_new_sets(
+                &mut fetch,
+                &mut hashes,
+                &mut packs,
+                &cards,
+                max_cards,
+                &|| Ok(()),
+            )
+            .unwrap();
             assert_eq!(result, golden[case], "{case}");
         }
     }
@@ -491,7 +536,7 @@ mod tests {
     #[test]
     fn oversized_official_image_is_rejected_before_decoding() {
         let mut fixture = fixture();
-        let image = RgbImage::new(MAX_IMAGE_SIDE + 1, 1);
+        let image = RgbImage::new(4001, 4000);
         let mut bytes = Cursor::new(Vec::new());
         DynamicImage::ImageRgb8(image)
             .write_to(&mut bytes, ImageFormat::Png)
@@ -499,5 +544,59 @@ mod tests {
         fixture.pages.insert("image".into(), bytes.into_inner());
         let (images, _) = fetch_card_page(&mut fixture, "4138", "ja").unwrap();
         assert!(images.is_empty());
+    }
+
+    #[test]
+    fn wide_official_image_within_pixel_limit_is_accepted() {
+        let mut fixture = fixture();
+        let image = RgbImage::new(5000, 100);
+        let mut bytes = Cursor::new(Vec::new());
+        DynamicImage::ImageRgb8(image)
+            .write_to(&mut bytes, ImageFormat::Png)
+            .unwrap();
+        fixture.pages.insert("image".into(), bytes.into_inner());
+        let (images, _) = fetch_card_page(&mut fixture, "4138", "ja").unwrap();
+        assert_eq!(images.len(), 1);
+    }
+
+    #[test]
+    fn cancellation_stops_remaining_cards_and_preserves_user_file() {
+        let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("../../local-results")
+            .join(format!("hash-cancel-{}", std::process::id()));
+        fs::create_dir_all(&root).unwrap();
+        let path = root.join("card_hashes_user.json");
+        let original = b"{\"unchanged\":true}";
+        fs::write(&path, original).unwrap();
+        let mut hashes = Map::new();
+        let mut packs = vec!["11".into()];
+        let cards = Map::from_iter([
+            ("4138".into(), json!({"n":"First"})),
+            ("99999".into(), json!({"n":"Second"})),
+        ]);
+        let calls = Cell::new(0);
+        let check = || {
+            calls.set(calls.get() + 1);
+            if calls.get() >= 5 {
+                Err("更新を中断しました".into())
+            } else {
+                Ok(())
+            }
+        };
+        let result = update_new_sets(
+            &mut fixture(),
+            &mut hashes,
+            &mut packs,
+            &cards,
+            4000,
+            &check,
+        )
+        .and_then(|summary| {
+            save_hashes_checked(&path, &hashes, &packs, check)?;
+            Ok(summary)
+        });
+        assert_eq!(result.unwrap_err(), "更新を中断しました");
+        assert_eq!(calls.get(), 5);
+        assert_eq!(fs::read(&path).unwrap(), original);
     }
 }

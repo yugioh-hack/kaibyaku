@@ -255,21 +255,6 @@ fn save_names(user_dir: &Path, cards: &Map<String, Value>, fetched: &str) -> Res
         let _ = fs::remove_file(&temporary);
         return Err(error);
     }
-    if path.exists() {
-        #[cfg(windows)]
-        {
-            use std::os::windows::ffi::OsStrExt;
-            unsafe extern "system" {
-                fn MoveFileExW(old: *const u16, new: *const u16, flags: u32) -> i32;
-            }
-            let from: Vec<u16> = temporary.as_os_str().encode_wide().chain([0]).collect();
-            let to: Vec<u16> = path.as_os_str().encode_wide().chain([0]).collect();
-            if unsafe { MoveFileExW(from.as_ptr(), to.as_ptr(), 1) } == 0 {
-                return Err(std::io::Error::last_os_error().to_string());
-            }
-            return Ok(());
-        }
-    }
     fs::rename(temporary, path).map_err(|e| e.to_string())
 }
 
