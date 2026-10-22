@@ -207,37 +207,42 @@ fn extension(p: &Path) -> bool {
         ["png", "jpg", "jpeg", "webp", "bmp"].contains(&e.to_ascii_lowercase().as_str())
     })
 }
-fn collect(paths: Vec<PathBuf>, o: &Options) -> Result<Vec<PathBuf>, String> {
-    fn visit(path: &Path, o: &Options, out: &mut Vec<PathBuf>) -> Result<(), String> {
-        if resolved(path)? == o.output {
-            return Ok(());
-        }
-        let mut entries = fs::read_dir(path)
-            .map_err(|e| e.to_string())?
-            .collect::<Result<Vec<_>, _>>()
-            .map_err(|e| e.to_string())?;
-        entries.sort_by_key(|e| e.file_name());
-        let mut dirs = vec![];
-        for e in entries {
-            let ft = e.file_type().map_err(|e| e.to_string())?;
-            if ft.is_dir() {
-                if o.recursive {
-                    dirs.push(e.path());
-                }
-            } else if extension(&e.path()) {
-                out.push(e.path());
-            }
-        }
-        for d in dirs {
-            visit(&d, o, out)?;
-        }
-        Ok(())
+fn visit(path: &Path, o: &Options, out: &mut Vec<PathBuf>) {
+    let Ok(actual) = resolved(path) else {
+        return;
+    };
+    if actual == o.output {
+        return;
     }
+    let Ok(entries) = fs::read_dir(path) else {
+        return;
+    };
+    let mut entries: Vec<_> = entries.filter_map(Result::ok).collect();
+    entries.sort_by_key(|e| e.file_name());
+    let mut dirs = vec![];
+    for e in entries {
+        let Ok(ft) = e.file_type() else {
+            continue;
+        };
+        if ft.is_dir() {
+            if o.recursive {
+                dirs.push(e.path());
+            }
+        } else if extension(&e.path()) {
+            out.push(e.path());
+        }
+    }
+    for d in dirs {
+        visit(&d, o, out);
+    }
+}
+
+fn collect(paths: Vec<PathBuf>, o: &Options) -> Result<Vec<PathBuf>, String> {
     let mut out = vec![];
     for path in paths {
         let path = std::path::absolute(path).map_err(|e| e.to_string())?;
         if path.is_dir() {
-            visit(&path, o, &mut out)?;
+            visit(&path, o, &mut out);
         } else if extension(&path) {
             out.push(path);
         }
@@ -656,6 +661,31 @@ mod tests {
             resolution: Resolution::Auto,
             dry: false,
         }
+    }
+    #[test]
+    fn vanished_directory_does_not_stop_collecting_other_images() {
+        let temp = Temp::new();
+        let o = options(&temp);
+        let vanished = temp.0.join("vanished");
+        fs::create_dir(&vanished).unwrap();
+        fs::remove_dir(&vanished).unwrap();
+        let remaining = temp.0.join("remaining");
+        fs::create_dir(&remaining).unwrap();
+        let image = remaining.join("card.png");
+        fs::write(&image, b"fixture").unwrap();
+        fs::create_dir(&o.output).unwrap();
+        fs::write(o.output.join("previous.png"), b"ignored").unwrap();
+
+        let mut found = Vec::new();
+        visit(&vanished, &o, &mut found);
+        visit(&remaining, &o, &mut found);
+        assert_eq!(found, vec![image.clone()]);
+        assert!(
+            collect(vec![temp.0.join("missing")], &o)
+                .unwrap()
+                .is_empty()
+        );
+        assert_eq!(collect(vec![temp.0.clone()], &o).unwrap(), vec![image]);
     }
     #[test]
     fn safe_names_and_unicode() {
