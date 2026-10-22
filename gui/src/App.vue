@@ -1,13 +1,16 @@
 <script setup lang="ts">
-import { computed, nextTick, onBeforeUnmount, onMounted, ref, shallowRef, triggerRef } from "vue";
-import { ask, invoke, listen, message, onClose, onDrop, pickFiles, pickFolder } from "./backend";
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, shallowRef, triggerRef, watch } from "vue";
+import { ask, imageUrl, invoke, listen, message, onClose, onDrop, pickFiles, pickFolder } from "./backend";
 import type {
   AppState,
+  Candidate,
+  CardRef,
   Config,
   DataSummary,
   IdentifyDone,
   IdentifyProgress,
   IdentifyResult,
+  LearnResult,
   UpdateDone,
 } from "./types";
 
@@ -121,6 +124,132 @@ function queueRow(result: IdentifyResult) {
 function clearRows() {
   pending = [];
   rows.value = [];
+  closePanel();
+}
+
+// ---- 絞り込み ----
+const FILTERS = ["すべて", ...STATUSES];
+const filter = ref("すべて");
+const counts = computed(() => {
+  const c: Record<string, number> = { すべて: rows.value.length, 確定: 0, 要確認: 0, カードなし: 0, エラー: 0 };
+  for (const r of rows.value) c[r.status]++;
+  return c;
+});
+const visible = computed(() => {
+  const out: Array<{ r: IdentifyResult; i: number }> = [];
+  rows.value.forEach((r, i) => {
+    if (filter.value === "すべて" || r.status === filter.value) out.push({ r, i });
+  });
+  return out;
+});
+watch(
+  () => counts.value[filter.value] === 0,
+  (empty) => {
+    if (empty) filter.value = "すべて";
+  },
+);
+
+// ---- 確認パネル ----
+const REVIEWABLE = ["要確認", "カードなし"];
+const selected = ref<number | null>(null);
+const current = computed(() => (selected.value === null ? null : (rows.value[selected.value] ?? null)));
+const candidates = ref<Candidate[]>([]);
+const query = ref("");
+const found = ref<CardRef[]>([]);
+const registering = ref(false);
+const locked = computed(() => !!busy.value || registering.value);
+let panelToken = 0;
+let searchToken = 0;
+let searchTimer: number | undefined;
+
+function closePanel() {
+  panelToken++;
+  searchToken++;
+  clearTimeout(searchTimer);
+  selected.value = null;
+  candidates.value = [];
+  found.value = [];
+  query.value = "";
+}
+
+async function selectRow(i: number) {
+  const r = rows.value[i];
+  if (!r || !REVIEWABLE.includes(r.status) || selected.value === i) return;
+  closePanel();
+  selected.value = i;
+  const token = panelToken;
+  const ranked = r.ranked ?? [];
+  if (!ranked.length) return;
+  try {
+    const names = await invoke<CardRef[]>("describe_cards", { cids: ranked.map(([, cid]) => String(cid)) });
+    if (token !== panelToken) return;
+    candidates.value = ranked.map(([distance, cid]) => ({
+      cid: String(cid),
+      name: names.find((n) => String(n.cid) === String(cid))?.name ?? String(cid),
+      distance,
+    }));
+  } catch (e) {
+    console.error(e);
+  }
+}
+
+watch(query, (q) => {
+  clearTimeout(searchTimer);
+  const token = ++searchToken;
+  if (!q.trim()) {
+    found.value = [];
+    return;
+  }
+  searchTimer = window.setTimeout(async () => {
+    try {
+      const list = await invoke<CardRef[]>("search_cards", { query: q });
+      if (token === searchToken) found.value = list;
+    } catch (e) {
+      if (token === searchToken) found.value = [];
+      console.error(e);
+    }
+  }, 250);
+});
+
+async function register(cid: string) {
+  const index = selected.value;
+  const row = current.value;
+  if (index === null || !row || locked.value) return;
+  registering.value = true;
+  try {
+    const learned = await invoke<LearnResult>("learn_card", { cid, source: row.source });
+    if (!learned.reprocess) {
+      await message(learned.message);
+    } else {
+      const out = output.value.trim();
+      const fresh = await invoke<IdentifyResult>("identify_one", { path: row.source, args: identifyArgs(out) });
+      const old = row.saved_path;
+      rows.value[index] = fresh;
+      triggerRef(rows);
+      closePanel();
+      if (fresh.status === "確定") {
+        if (old && old !== fresh.saved_path) {
+          try {
+            await invoke("remove_review_copy", { path: old, output: out });
+          } catch (e) {
+            console.error(e);
+          }
+        }
+      } else {
+        await selectRow(index);
+      }
+      status.value = `${learned.message}: ${fresh.status}`;
+    }
+    await refreshData();
+  } catch (e) {
+    await message(String(e), "error");
+  } finally {
+    registering.value = false;
+  }
+}
+
+function onKey(e: KeyboardEvent) {
+  if (e.key === "Escape" && selected.value !== null && !updateOpen.value) closePanel();
 }
 
 // ---- 入力 ----
@@ -128,6 +257,21 @@ async function guardBusy(): Promise<boolean> {
   if (!busy.value) return false;
   await message("いま処理中です。終わるまでお待ちください。");
   return true;
+}
+
+function identifyArgs(out: string) {
+  return {
+    output: out,
+    save_format: format.value,
+    rounded: rounded.value,
+    recursive: recursive.value,
+    skip_duplicate: skipDuplicate.value,
+    save_review: saveReview.value,
+    save_not_card: saveNotCard.value,
+    english: ENGLISH[english.value] ?? "name",
+    split: SPLIT[split.value] ?? "none",
+    resolution: RESOLUTIONS[resolution.value] ?? "auto",
+  };
 }
 
 async function start(paths: string[]) {
@@ -150,18 +294,7 @@ async function start(paths: string[]) {
   try {
     await invoke("start_identify", {
       paths,
-      args: {
-        output: out,
-        save_format: format.value,
-        rounded: rounded.value,
-        recursive: recursive.value,
-        skip_duplicate: skipDuplicate.value,
-        save_review: saveReview.value,
-        save_not_card: saveNotCard.value,
-        english: ENGLISH[english.value] ?? "name",
-        split: SPLIT[split.value] ?? "none",
-        resolution: RESOLUTIONS[resolution.value] ?? "auto",
-      },
+      args: identifyArgs(out),
     });
   } catch (e) {
     busy.value = null;
@@ -286,8 +419,10 @@ const distanceText = (r: IdentifyResult) => (r.distance < 999 ? String(r.distanc
 const fileName = (path: string) => path.split(/[\\/]/).pop() ?? path;
 
 const unlisten: Array<() => void> = [];
+const thumb = (r: IdentifyResult) => (r.saved_path ? imageUrl(r.saved_path) : "");
 
 onMounted(async () => {
+  window.addEventListener("keydown", onKey);
   const state = await invoke<AppState>("get_state");
   config = state.config;
   data.value = state.data;
@@ -324,7 +459,10 @@ onMounted(async () => {
   setTimeout(offerFirstFetch, 300);
 });
 
-onBeforeUnmount(() => unlisten.forEach((fn) => fn()));
+onBeforeUnmount(() => {
+  window.removeEventListener("keydown", onKey);
+  unlisten.forEach((fn) => fn());
+});
 </script>
 
 <template>
@@ -407,28 +545,82 @@ onBeforeUnmount(() => unlisten.forEach((fn) => fn()));
       <div class="status">{{ status }}</div>
     </section>
 
-    <section class="results">
-      <div class="head row">
-        <span>状態</span>
-        <span>カード名</span>
-        <span class="num">距離</span>
-        <span>元ファイル</span>
-      </div>
-      <div ref="listEl" class="list">
-        <div v-for="(r, i) in rows" :key="i" class="row item" :class="'s-' + STATUSES.indexOf(r.status)">
-          <span class="state">{{ r.status }}</span>
-          <span class="name">
-            {{ r.name || "-" }}
-            <em v-if="r.english" class="badge">英語版</em>
-          </span>
-          <span class="num">{{ distanceText(r) }}</span>
-          <span class="file" :title="r.source">
-            {{ fileName(r.source) }}
-            <small v-if="r.note">{{ r.note }}</small>
-          </span>
+    <div class="work">
+      <section class="results">
+        <div class="filters">
+          <button
+            v-for="f in FILTERS"
+            :key="f"
+            class="chip"
+            :class="{ on: filter === f }"
+            :disabled="counts[f] === 0"
+            @click="filter = f"
+          >
+            {{ f }} {{ counts[f] }}
+          </button>
         </div>
-      </div>
-    </section>
+        <div class="head row">
+          <span></span>
+          <span>状態</span>
+          <span>カード名</span>
+          <span class="num">距離</span>
+          <span>元ファイル</span>
+        </div>
+        <div ref="listEl" class="list">
+          <div
+            v-for="{ r, i } in visible"
+            :key="i"
+            class="row item"
+            :class="['s-' + STATUSES.indexOf(r.status), { pick: REVIEWABLE.includes(r.status), sel: selected === i }]"
+            @click="selectRow(i)"
+          >
+            <span class="thumb">
+              <img v-if="r.saved_path" :src="thumb(r)" loading="lazy" decoding="async" alt="" />
+            </span>
+            <span class="state">{{ r.status }}</span>
+            <span class="name">
+              {{ r.name || "-" }}
+              <em v-if="r.english" class="badge">英語版</em>
+            </span>
+            <span class="num">{{ distanceText(r) }}</span>
+            <span class="file" :title="r.source">
+              {{ fileName(r.source) }}
+              <small v-if="r.note">{{ r.note }}</small>
+            </span>
+          </div>
+        </div>
+      </section>
+
+      <aside v-if="current" class="review" aria-label="確認">
+        <div class="review-head">
+          <span class="file" :title="current.source">{{ fileName(current.source) }}</span>
+          <button class="plain close" aria-label="閉じる" @click="closePanel">×</button>
+        </div>
+        <div class="review-body">
+          <img class="crop" :src="imageUrl(current.saved_path || current.source)" alt="" />
+          <div class="now" :class="'s-' + STATUSES.indexOf(current.status)">
+            <span class="state">{{ current.status }}</span>
+            <span class="name">{{ current.name || "-" }}</span>
+            <span class="num">{{ distanceText(current) }}</span>
+          </div>
+          <ul v-if="candidates.length" class="cands">
+            <li v-for="c in candidates" :key="c.cid">
+              <span class="name" :title="c.name">{{ c.name }}</span>
+              <span class="num">{{ c.distance }}</span>
+              <button :disabled="locked" @click="register(c.cid)">登録</button>
+            </li>
+          </ul>
+          <input v-model="query" type="search" placeholder="カード名・IDで検索" spellcheck="false" />
+          <ul v-if="found.length" class="cands">
+            <li v-for="c in found" :key="c.cid">
+              <span class="name" :title="c.name">{{ c.name }}</span>
+              <span class="num">{{ c.cid }}</span>
+              <button :disabled="locked" @click="register(c.cid)">登録</button>
+            </li>
+          </ul>
+        </div>
+      </aside>
+    </div>
 
     <div v-if="updateOpen" class="overlay">
       <div class="dialog" role="dialog" aria-label="カードデータ更新">
@@ -691,11 +883,17 @@ input[type="checkbox"] {
   min-height: 1.4em;
 }
 
+.work {
+  display: flex;
+  flex: 1;
+  min-height: 320px;
+  gap: 10px;
+}
 .results {
   display: flex;
   flex-direction: column;
   flex: 1;
-  min-height: 120px;
+  min-width: 0;
   background: var(--panel);
   border: 1px solid var(--border);
   border-radius: 10px;
@@ -703,7 +901,7 @@ input[type="checkbox"] {
 }
 .row {
   display: grid;
-  grid-template-columns: 4.8em minmax(0, 1.1fr) 3.5em minmax(0, 1.4fr);
+  grid-template-columns: 30px 4.8em minmax(0, 1.1fr) 3.5em minmax(0, 1.4fr);
   gap: 10px;
   padding: 5px 12px;
   align-items: baseline;
@@ -726,9 +924,136 @@ input[type="checkbox"] {
   overflow-y: auto;
 }
 .item {
+  height: 46px;
+  align-items: center;
   content-visibility: auto;
-  contain-intrinsic-size: auto 28px;
+  contain-intrinsic-size: auto 46px;
   border-bottom: 1px solid color-mix(in srgb, var(--border) 50%, transparent);
+}
+.thumb {
+  display: block;
+  width: 30px;
+  height: 36px;
+  text-align: center;
+}
+.thumb img {
+  height: 36px;
+  aspect-ratio: 894 / 1302;
+  object-fit: cover;
+  border-radius: 2px;
+  background: var(--border);
+}
+.item.pick {
+  cursor: pointer;
+}
+.item.pick:hover {
+  background: var(--accent-soft);
+}
+.item.sel {
+  background: var(--accent-soft);
+  box-shadow: inset 3px 0 0 var(--accent);
+}
+.filters {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  padding: 6px 12px;
+  border-bottom: 1px solid var(--border);
+}
+.chip {
+  padding: 2px 10px;
+  border-radius: 12px;
+}
+.chip.on {
+  background: var(--accent-soft);
+  border-color: var(--accent);
+  color: var(--accent);
+}
+.review {
+  display: flex;
+  flex-direction: column;
+  flex: 0 0 280px;
+  min-width: 0;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  overflow: hidden;
+}
+.review-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 6px 6px 12px;
+  border-bottom: 1px solid var(--border);
+}
+.review-head .file {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.close {
+  padding: 0 10px;
+  font-size: 18px;
+  line-height: 1.4;
+}
+.review-body {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 10px 12px;
+  overflow-y: auto;
+}
+.crop {
+  align-self: center;
+  max-width: 100%;
+  max-height: 130px;
+  object-fit: contain;
+  border-radius: 4px;
+  background: var(--border);
+}
+.now {
+  display: flex;
+  gap: 8px;
+  align-items: baseline;
+}
+.now .name {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.cands {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.cands li {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.cands .name {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.cands button {
+  padding: 2px 10px;
+}
+.review input[type="search"] {
+  background: var(--field);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 5px 8px;
+  min-width: 0;
 }
 .item .state {
   font-weight: 600;

@@ -1,5 +1,5 @@
 // Tauri との橋渡し。ブラウザー（開発サーバー）ではモックに差し替える。
-import { invoke as tauriInvoke } from "@tauri-apps/api/core";
+import { convertFileSrc, invoke as tauriInvoke } from "@tauri-apps/api/core";
 import { listen as tauriListen } from "@tauri-apps/api/event";
 import { getCurrentWebview } from "@tauri-apps/api/webview";
 import { getCurrentWindow } from "@tauri-apps/api/window";
@@ -70,4 +70,9 @@ export async function message(text: string, kind: "info" | "warning" | "error" =
 export async function ask(text: string): Promise<boolean> {
   if (mock) return mock.ask(text);
   return tauriAsk(text, { title: TITLE, kind: "info" });
+}
+
+/** 画像ファイルの表示用URL。ブラウザー（モック）では代わりの絵を返す。 */
+export function imageUrl(path: string): string {
+  return mock ? mock.imageUrl(path) : convertFileSrc(path);
 }

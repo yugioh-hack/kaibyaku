@@ -37,6 +37,7 @@ export interface IdentifyResult {
   distance: number;
   margin: number;
   saved_path: string | null;
+  ranked?: Array<[number, string]>;
   note: string;
   english: boolean;
 }
@@ -61,4 +62,18 @@ export interface IdentifyDone {
 export interface UpdateDone {
   message?: string;
   error?: string;
+}
+
+export interface CardRef {
+  cid: string;
+  name: string;
+}
+
+export interface Candidate extends CardRef {
+  distance?: number;
+}
+
+export interface LearnResult {
+  message: string;
+  reprocess: boolean;
 }

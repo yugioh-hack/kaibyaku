@@ -184,10 +184,16 @@ fn start_identify(
 ) -> Result<(), String> {
     let o = options(&args, user_dir()?)?;
     start(&busy)?;
-    // 結果一覧のサムネイル用に、出力先の画像だけを画面から読めるようにする
-    let _ = app
-        .asset_protocol_scope()
-        .allow_directory(PathBuf::from(args.output.trim()), true);
+    // サムネイルと確認パネル用に、出力先と、今回入力した画像だけを画面から読めるようにする
+    let scope = app.asset_protocol_scope();
+    let _ = scope.allow_directory(PathBuf::from(args.output.trim()), true);
+    for path in paths.iter().map(PathBuf::from) {
+        let _ = if path.is_dir() {
+            scope.allow_directory(&path, true)
+        } else {
+            scope.allow_file(&path)
+        };
+    }
     let busy = Arc::clone(&busy);
     thread::spawn(move || {
         let _guard = RunningGuard(&busy.running);

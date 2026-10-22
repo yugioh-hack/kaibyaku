@@ -57,7 +57,15 @@ function makeResult(i: number): IdentifyResult {
     name: none ? null : english ? "Blue-Eyes White Dragon" : SAMPLE_NAMES[i % 5],
     distance: none ? 999 : kind === "要確認" ? 14 : i % 6,
     margin: 5,
-    saved_path: null,
+    saved_path: kind === "エラー" ? null : `C:\\mock\\out\\${kind === "確定" ? "" : kind === "要確認" ? "review\\" : "not_card\\"}card_${i}.webp`,
+    ranked:
+      kind === "要確認" || (kind === "カードなし" && i % 2 === 0)
+        ? [
+            [kind === "要確認" ? 14 : 31, String(4000 + i)],
+            [kind === "要確認" ? 16 : 33, String(5000 + i)],
+            [kind === "要確認" ? 21 : 38, String(6000 + i)],
+          ]
+        : [],
     note: kind === "エラー" ? "画像を読み込めません" : kind === "要確認" ? "2位と近い" : "",
     english,
   };
@@ -129,6 +137,25 @@ function startUpdate(hashes: boolean) {
   );
 }
 
+export function imageUrl(path: string): string {
+  let h = 0;
+  for (const c of path) h = (h * 31 + c.charCodeAt(0)) >>> 0;
+  const hue = h % 360;
+  const svg =
+    `<svg xmlns="http://www.w3.org/2000/svg" width="89" height="130" viewBox="0 0 89 130">` +
+    `<rect width="89" height="130" rx="6" fill="hsl(${hue} 45% 45%)"/>` +
+    `<rect x="8" y="8" width="73" height="114" rx="3" fill="none" stroke="hsl(${hue} 60% 85%)" stroke-width="3"/>` +
+    `<rect x="14" y="30" width="61" height="52" fill="hsl(${hue} 40% 70%)"/></svg>`;
+  return "data:image/svg+xml," + encodeURIComponent(svg);
+}
+
+const pause = (ms: number) => new Promise((r) => setTimeout(r, ms));
+const cardName = (cid: string) => `モックカード ${cid}`;
+const CATALOG = ["4003", "4010", "5003", "6003", "7001"].map((cid, i) => ({
+  cid,
+  name: i < SAMPLE_NAMES.length ? SAMPLE_NAMES[i] : cardName(cid),
+}));
+
 export async function invoke(command: string, args: Record<string, unknown> = {}): Promise<unknown> {
   switch (command) {
     case "get_state":
@@ -151,6 +178,45 @@ export async function invoke(command: string, args: Record<string, unknown> = {}
       return;
     case "data_summary":
       return { ...data };
+    case "identify_one": {
+      if (busy) throw "いま処理中です。終わるまでお待ちください。";
+      await pause(400);
+      const source = String(args.path);
+      return {
+        source,
+        status: "確定",
+        card_id: 4003,
+        name: SAMPLE_NAMES[0],
+        distance: 0,
+        margin: 20,
+        saved_path: `C:\\mock\\out\\card_new_${Date.now() % 100000}.webp`,
+        ranked: [[0, "4003"]],
+        note: "",
+        english: false,
+      };
+    }
+    case "describe_cards":
+      await pause(80);
+      return (args.cids as string[]).map((cid) => ({
+        cid,
+        name: CATALOG.find((c) => c.cid === cid)?.name ?? cardName(cid),
+      }));
+    case "search_cards": {
+      await pause(120);
+      const q = String(args.query).trim().toLowerCase();
+      if (!q) return [];
+      if (q === "error") throw "検索に失敗しました";
+      return CATALOG.filter((c) => c.name.toLowerCase().includes(q) || c.cid.includes(q));
+    }
+    case "learn_card":
+      await pause(300);
+      if (args.cid === "6003") throw "カードの位置を決められませんでした（モック）";
+      if (args.cid === "5003") return { message: "近いハッシュがすでにあるので、追加しません", reprocess: false };
+      data.hashes += 1;
+      return { message: "照合用ハッシュを追加しました", reprocess: true };
+    case "remove_review_copy":
+      console.info("[mock remove_review_copy]", args.path, args.output);
+      return;
     case "open_folder":
       console.info("[mock open_folder]", args.path);
       return;
