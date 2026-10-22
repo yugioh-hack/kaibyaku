@@ -11,3 +11,6 @@ serde_json.workspace = true
 webp = "=0.3.1"
 unicode-normalization = "0.1"
 chrono = { version = "=0.4.45", default-features = false, features = ["clock"] }
+ureq = "=3.4.2"
+regex = "1"
+html-escape = "0.2"
