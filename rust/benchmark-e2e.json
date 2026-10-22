@@ -5,62 +5,466 @@
     "processor": "AMD64 Family 25 Model 80 Stepping 0, AuthenticAMD",
     "logical_cpus": 16,
     "python": "3.14.7",
-    "power": "Windows Balanced (powercfg /getactivescheme)"
+    "power": {
+      "original_plan_guid": "381b4222-f694-41f0-9685-ff5bb260df2e",
+      "measurement_plan_guid": "8c5e7fda-e8bf-4a96-9a85-a6e23a8c635c",
+      "high_performance_enabled": true,
+      "ac_connected_at_start": true,
+      "original_plan_restored": true
+    },
+    "cpu_indicator": "Windows Processor Information(_Total)/% Processor Performance sampled immediately before and after each timed child process; not temperature or average in-run clock"
   },
+  "outlier_rule": "A run is flagged when its elapsed time is more than 25% above or below the five-run median; no run is omitted from median/min/max",
   "images": "C:\\dev\\mdript-sample-img",
   "image_count": 256,
   "modes": {
     "python_1": {
-      "median_s": 131.10647640000025,
-      "min_s": 61.021244799998385,
-      "max_s": 132.1652357999992,
+      "median_s": 57.98172639999757,
+      "min_s": 56.610975299998245,
+      "max_s": 60.592591299999185,
       "times_s": [
-        132.1652357999992,
-        131.04740010000023,
-        131.10647640000025,
-        131.36529049999808,
-        61.021244799998385
+        56.610975299998245,
+        60.592591299999185,
+        59.956645799997204,
+        57.3722291999984,
+        57.98172639999757
       ],
-      "warmup_s": 131.64261350000015
+      "warmup_s": 63.93087699999887,
+      "anomalous_run_numbers": [],
+      "runs": [
+        {
+          "kind": "warmup",
+          "elapsed_s": 63.93087699999887,
+          "counts": {
+            "confirmed": 256,
+            "review": 0,
+            "not_card": 0,
+            "error": 0,
+            "skipped": 4
+          },
+          "files": 252,
+          "ac_before": true,
+          "ac_after": true,
+          "cpu_performance_percent_before": 179.704857076458,
+          "cpu_performance_percent_after": 190.504785830127
+        },
+        {
+          "kind": "measured",
+          "elapsed_s": 56.610975299998245,
+          "counts": {
+            "confirmed": 256,
+            "review": 0,
+            "not_card": 0,
+            "error": 0,
+            "skipped": 4
+          },
+          "files": 252,
+          "ac_before": true,
+          "ac_after": true,
+          "cpu_performance_percent_before": 163.335583857603,
+          "cpu_performance_percent_after": 130.031118448205
+        },
+        {
+          "kind": "measured",
+          "elapsed_s": 60.592591299999185,
+          "counts": {
+            "confirmed": 256,
+            "review": 0,
+            "not_card": 0,
+            "error": 0,
+            "skipped": 4
+          },
+          "files": 252,
+          "ac_before": true,
+          "ac_after": true,
+          "cpu_performance_percent_before": 167.124763072806,
+          "cpu_performance_percent_after": 145.195396862931
+        },
+        {
+          "kind": "measured",
+          "elapsed_s": 59.956645799997204,
+          "counts": {
+            "confirmed": 256,
+            "review": 0,
+            "not_card": 0,
+            "error": 0,
+            "skipped": 4
+          },
+          "files": 252,
+          "ac_before": true,
+          "ac_after": true,
+          "cpu_performance_percent_before": 182.893739484637,
+          "cpu_performance_percent_after": 160.900136477011
+        },
+        {
+          "kind": "measured",
+          "elapsed_s": 57.3722291999984,
+          "counts": {
+            "confirmed": 256,
+            "review": 0,
+            "not_card": 0,
+            "error": 0,
+            "skipped": 4
+          },
+          "files": 252,
+          "ac_before": true,
+          "ac_after": true,
+          "cpu_performance_percent_before": 156.238090157375,
+          "cpu_performance_percent_after": 144.714574120361
+        },
+        {
+          "kind": "measured",
+          "elapsed_s": 57.98172639999757,
+          "counts": {
+            "confirmed": 256,
+            "review": 0,
+            "not_card": 0,
+            "error": 0,
+            "skipped": 4
+          },
+          "files": 252,
+          "ac_before": true,
+          "ac_after": true,
+          "cpu_performance_percent_before": 187.510138532008,
+          "cpu_performance_percent_after": 177.224680883589
+        }
+      ]
     },
     "rust_1": {
-      "median_s": 72.62146049999865,
-      "min_s": 30.674957899998844,
-      "max_s": 73.29241940000065,
+      "median_s": 31.488171099998,
+      "min_s": 31.15771279999899,
+      "max_s": 33.27506770000036,
       "times_s": [
-        73.29241940000065,
-        72.62146049999865,
-        72.86466800000198,
-        72.37927670000136,
-        30.674957899998844
+        31.15771279999899,
+        31.488171099998,
+        33.27506770000036,
+        31.286763600000995,
+        32.43094000000201
       ],
-      "warmup_s": 72.96724259999974
+      "warmup_s": 31.899785699999484,
+      "anomalous_run_numbers": [],
+      "runs": [
+        {
+          "kind": "warmup",
+          "elapsed_s": 31.899785699999484,
+          "counts": {
+            "confirmed": 256,
+            "review": 0,
+            "not_card": 0,
+            "error": 0,
+            "skipped": 4
+          },
+          "files": 252,
+          "ac_before": true,
+          "ac_after": true,
+          "cpu_performance_percent_before": 194.633971449247,
+          "cpu_performance_percent_after": 143.387839350686
+        },
+        {
+          "kind": "measured",
+          "elapsed_s": 31.15771279999899,
+          "counts": {
+            "confirmed": 256,
+            "review": 0,
+            "not_card": 0,
+            "error": 0,
+            "skipped": 4
+          },
+          "files": 252,
+          "ac_before": true,
+          "ac_after": true,
+          "cpu_performance_percent_before": 138.212636131922,
+          "cpu_performance_percent_after": 141.285273368607
+        },
+        {
+          "kind": "measured",
+          "elapsed_s": 31.488171099998,
+          "counts": {
+            "confirmed": 256,
+            "review": 0,
+            "not_card": 0,
+            "error": 0,
+            "skipped": 4
+          },
+          "files": 252,
+          "ac_before": true,
+          "ac_after": true,
+          "cpu_performance_percent_before": 133.285726252304,
+          "cpu_performance_percent_after": 137.972531664886
+        },
+        {
+          "kind": "measured",
+          "elapsed_s": 33.27506770000036,
+          "counts": {
+            "confirmed": 256,
+            "review": 0,
+            "not_card": 0,
+            "error": 0,
+            "skipped": 4
+          },
+          "files": 252,
+          "ac_before": true,
+          "ac_after": true,
+          "cpu_performance_percent_before": 182.279496621916,
+          "cpu_performance_percent_after": 170.001749809112
+        },
+        {
+          "kind": "measured",
+          "elapsed_s": 31.286763600000995,
+          "counts": {
+            "confirmed": 256,
+            "review": 0,
+            "not_card": 0,
+            "error": 0,
+            "skipped": 4
+          },
+          "files": 252,
+          "ac_before": true,
+          "ac_after": true,
+          "cpu_performance_percent_before": 167.447882599581,
+          "cpu_performance_percent_after": 145.384757676656
+        },
+        {
+          "kind": "measured",
+          "elapsed_s": 32.43094000000201,
+          "counts": {
+            "confirmed": 256,
+            "review": 0,
+            "not_card": 0,
+            "error": 0,
+            "skipped": 4
+          },
+          "files": 252,
+          "ac_before": true,
+          "ac_after": true,
+          "cpu_performance_percent_before": 163.043838010073,
+          "cpu_performance_percent_after": 161.943422871222
+        }
+      ]
     },
     "python_default": {
-      "median_s": 23.390129600000364,
-      "min_s": 11.412120699998923,
-      "max_s": 24.473777499999414,
+      "median_s": 14.114333500001521,
+      "min_s": 13.553870800002187,
+      "max_s": 14.913724800000637,
       "times_s": [
-        24.473777499999414,
-        23.46714200000133,
-        23.390129600000364,
-        23.138543100001698,
-        11.412120699998923
+        13.713903299998492,
+        14.114333500001521,
+        14.774757899998804,
+        13.553870800002187,
+        14.913724800000637
       ],
-      "warmup_s": 23.42399999999907
+      "warmup_s": 15.402841600000102,
+      "anomalous_run_numbers": [],
+      "runs": [
+        {
+          "kind": "warmup",
+          "elapsed_s": 15.402841600000102,
+          "counts": {
+            "confirmed": 256,
+            "review": 0,
+            "not_card": 0,
+            "error": 0,
+            "skipped": 4
+          },
+          "files": 252,
+          "ac_before": true,
+          "ac_after": true,
+          "cpu_performance_percent_before": 175.6786263709,
+          "cpu_performance_percent_after": 190.778783403174
+        },
+        {
+          "kind": "measured",
+          "elapsed_s": 13.713903299998492,
+          "counts": {
+            "confirmed": 256,
+            "review": 0,
+            "not_card": 0,
+            "error": 0,
+            "skipped": 4
+          },
+          "files": 252,
+          "ac_before": true,
+          "ac_after": true,
+          "cpu_performance_percent_before": 162.886358327494,
+          "cpu_performance_percent_after": 131.83722348023
+        },
+        {
+          "kind": "measured",
+          "elapsed_s": 14.114333500001521,
+          "counts": {
+            "confirmed": 256,
+            "review": 0,
+            "not_card": 0,
+            "error": 0,
+            "skipped": 4
+          },
+          "files": 252,
+          "ac_before": true,
+          "ac_after": true,
+          "cpu_performance_percent_before": 135.138126927447,
+          "cpu_performance_percent_after": 198.476728010279
+        },
+        {
+          "kind": "measured",
+          "elapsed_s": 14.774757899998804,
+          "counts": {
+            "confirmed": 256,
+            "review": 0,
+            "not_card": 0,
+            "error": 0,
+            "skipped": 4
+          },
+          "files": 252,
+          "ac_before": true,
+          "ac_after": true,
+          "cpu_performance_percent_before": 165.433098469335,
+          "cpu_performance_percent_after": 181.46297544835
+        },
+        {
+          "kind": "measured",
+          "elapsed_s": 13.553870800002187,
+          "counts": {
+            "confirmed": 256,
+            "review": 0,
+            "not_card": 0,
+            "error": 0,
+            "skipped": 4
+          },
+          "files": 252,
+          "ac_before": true,
+          "ac_after": true,
+          "cpu_performance_percent_before": 141.065620432341,
+          "cpu_performance_percent_after": 135.381024941856
+        },
+        {
+          "kind": "measured",
+          "elapsed_s": 14.913724800000637,
+          "counts": {
+            "confirmed": 256,
+            "review": 0,
+            "not_card": 0,
+            "error": 0,
+            "skipped": 4
+          },
+          "files": 252,
+          "ac_before": true,
+          "ac_after": true,
+          "cpu_performance_percent_before": 154.489174006662,
+          "cpu_performance_percent_after": 141.002019182231
+        }
+      ]
     },
     "rust_default": {
-      "median_s": 11.308251200000086,
-      "min_s": 6.354231500001333,
-      "max_s": 11.567610800000693,
+      "median_s": 7.490989500001888,
+      "min_s": 7.333917500000098,
+      "max_s": 7.6067347999996855,
       "times_s": [
-        11.567610800000693,
-        11.308251200000086,
-        11.51438639999833,
-        8.465934099996957,
-        6.354231500001333
+        7.333917500000098,
+        7.490989500001888,
+        7.4953491999986,
+        7.340965600000345,
+        7.6067347999996855
       ],
-      "warmup_s": 11.516001199997845
+      "warmup_s": 7.426342900002055,
+      "anomalous_run_numbers": [],
+      "runs": [
+        {
+          "kind": "warmup",
+          "elapsed_s": 7.426342900002055,
+          "counts": {
+            "confirmed": 256,
+            "review": 0,
+            "not_card": 0,
+            "error": 0,
+            "skipped": 4
+          },
+          "files": 252,
+          "ac_before": true,
+          "ac_after": true,
+          "cpu_performance_percent_before": 194.595245276515,
+          "cpu_performance_percent_after": 164.594831765733
+        },
+        {
+          "kind": "measured",
+          "elapsed_s": 7.333917500000098,
+          "counts": {
+            "confirmed": 256,
+            "review": 0,
+            "not_card": 0,
+            "error": 0,
+            "skipped": 4
+          },
+          "files": 252,
+          "ac_before": true,
+          "ac_after": true,
+          "cpu_performance_percent_before": 144.299493536926,
+          "cpu_performance_percent_after": 211.707840255113
+        },
+        {
+          "kind": "measured",
+          "elapsed_s": 7.490989500001888,
+          "counts": {
+            "confirmed": 256,
+            "review": 0,
+            "not_card": 0,
+            "error": 0,
+            "skipped": 4
+          },
+          "files": 252,
+          "ac_before": true,
+          "ac_after": true,
+          "cpu_performance_percent_before": 212.374464920255,
+          "cpu_performance_percent_after": 150.897382700287
+        },
+        {
+          "kind": "measured",
+          "elapsed_s": 7.4953491999986,
+          "counts": {
+            "confirmed": 256,
+            "review": 0,
+            "not_card": 0,
+            "error": 0,
+            "skipped": 4
+          },
+          "files": 252,
+          "ac_before": true,
+          "ac_after": true,
+          "cpu_performance_percent_before": 147.711903804032,
+          "cpu_performance_percent_after": 174.409610167071
+        },
+        {
+          "kind": "measured",
+          "elapsed_s": 7.340965600000345,
+          "counts": {
+            "confirmed": 256,
+            "review": 0,
+            "not_card": 0,
+            "error": 0,
+            "skipped": 4
+          },
+          "files": 252,
+          "ac_before": true,
+          "ac_after": true,
+          "cpu_performance_percent_before": 136.017824635922,
+          "cpu_performance_percent_after": 144.246823833141
+        },
+        {
+          "kind": "measured",
+          "elapsed_s": 7.6067347999996855,
+          "counts": {
+            "confirmed": 256,
+            "review": 0,
+            "not_card": 0,
+            "error": 0,
+            "skipped": 4
+          },
+          "files": 252,
+          "ac_before": true,
+          "ac_after": true,
+          "cpu_performance_percent_before": 178.068127288799,
+          "cpu_performance_percent_after": 182.714427030202
+        }
+      ]
     }
   },
   "counts": {
@@ -377,9 +781,73 @@
     }
   },
   "output_examples": {
-    "python_1": "C:\\Users\\owner\\.codex\\worktrees\\rust-prototype\\mdript\\rust\\local-results\\e2e-20261022-run2\\python_1-1",
-    "rust_1": "C:\\Users\\owner\\.codex\\worktrees\\rust-prototype\\mdript\\rust\\local-results\\e2e-20261022-run2\\rust_1-1",
-    "python_default": "C:\\Users\\owner\\.codex\\worktrees\\rust-prototype\\mdript\\rust\\local-results\\e2e-20261022-run2\\python_default-1",
-    "rust_default": "C:\\Users\\owner\\.codex\\worktrees\\rust-prototype\\mdript\\rust\\local-results\\e2e-20261022-run2\\rust_default-1"
+    "python_1": "C:\\Users\\owner\\.codex\\worktrees\\rust-prototype\\mdript\\rust\\local-results\\e2e-20261022-ac\\python_1-1",
+    "rust_1": "C:\\Users\\owner\\.codex\\worktrees\\rust-prototype\\mdript\\rust\\local-results\\e2e-20261022-ac\\rust_1-1",
+    "python_default": "C:\\Users\\owner\\.codex\\worktrees\\rust-prototype\\mdript\\rust\\local-results\\e2e-20261022-ac\\python_default-1",
+    "rust_default": "C:\\Users\\owner\\.codex\\worktrees\\rust-prototype\\mdript\\rust\\local-results\\e2e-20261022-ac\\rust_default-1"
+  },
+  "previous_measurement": {
+    "note": "2026-10-22 measurement may have occurred while PC performance was limited; retained for comparison",
+    "environment": {
+      "platform": "Windows-11-10.0.26300-SP0",
+      "processor": "AMD64 Family 25 Model 80 Stepping 0, AuthenticAMD",
+      "logical_cpus": 16,
+      "python": "3.14.7",
+      "power": "Windows Balanced (powercfg /getactivescheme)"
+    },
+    "modes": {
+      "python_1": {
+        "median_s": 131.10647640000025,
+        "min_s": 61.021244799998385,
+        "max_s": 132.1652357999992,
+        "times_s": [
+          132.1652357999992,
+          131.04740010000023,
+          131.10647640000025,
+          131.36529049999808,
+          61.021244799998385
+        ],
+        "warmup_s": 131.64261350000015
+      },
+      "rust_1": {
+        "median_s": 72.62146049999865,
+        "min_s": 30.674957899998844,
+        "max_s": 73.29241940000065,
+        "times_s": [
+          73.29241940000065,
+          72.62146049999865,
+          72.86466800000198,
+          72.37927670000136,
+          30.674957899998844
+        ],
+        "warmup_s": 72.96724259999974
+      },
+      "python_default": {
+        "median_s": 23.390129600000364,
+        "min_s": 11.412120699998923,
+        "max_s": 24.473777499999414,
+        "times_s": [
+          24.473777499999414,
+          23.46714200000133,
+          23.390129600000364,
+          23.138543100001698,
+          11.412120699998923
+        ],
+        "warmup_s": 23.42399999999907
+      },
+      "rust_default": {
+        "median_s": 11.308251200000086,
+        "min_s": 6.354231500001333,
+        "max_s": 11.567610800000693,
+        "times_s": [
+          11.567610800000693,
+          11.308251200000086,
+          11.51438639999833,
+          8.465934099996957,
+          6.354231500001333
+        ],
+        "warmup_s": 11.516001199997845
+      }
+    }
   }
 }
