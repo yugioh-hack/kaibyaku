@@ -1,15 +1,4 @@
-#[cfg(not(panic = "unwind"))]
-compile_error!(
-    "mdript-cli requires panic=unwind so per-image panic recovery can release worker reservations"
-);
-
-mod csv_log;
-mod hash_cli;
-mod learn;
-mod paths;
-mod process;
-mod updater;
-mod updater_hash;
+use mdript_cli::{hash_cli, learn, process, updater, updater_hash};
 use serde_json::json;
 use std::process::ExitCode;
 fn main() -> ExitCode {

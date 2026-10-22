@@ -110,6 +110,12 @@ pub(crate) fn save_hashes_checked(
     fs::rename(&temporary, path).map_err(|e| e.to_string())
 }
 
+/// 画像1枚のハッシュをカードIDの照合用に追加する（Python 版 cli.learn と同じ判定）。
+pub fn learn_image(cid: &str, image: &Path, user_dir: &Path) -> Result<Value, String> {
+    let user_dir = crate::paths::validate_user_data(user_dir)?;
+    learn(cid, image, &user_dir)
+}
+
 fn learn(cid: &str, image: &Path, user_dir: &Path) -> Result<Value, String> {
     let guard = WRITE_LOCK
         .get_or_init(|| Mutex::new(()))

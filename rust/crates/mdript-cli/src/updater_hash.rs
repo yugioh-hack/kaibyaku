@@ -1,7 +1,7 @@
 use crate::{
     learn::{loaded_hashes, read_object, save_hashes_checked},
     updater::{
-        BASE, Fetch, HttpClient, check_cancelled, clean, install_cancel_handler, parse_rows,
+        BASE, Fetch, HttpClient, check_cancelled, clean, install_cancel_handler, parse_rows, report,
     },
 };
 use mdript_core::{artwork_hash, decode::load_rgb_bytes};
@@ -133,11 +133,13 @@ fn update_hashes(
     hashes: &mut Map<String, Value>,
     cids: &[String],
     english_only: &HashSet<String>,
+    label: &str,
     check: &impl Fn() -> Result<(), String>,
 ) -> Result<HashProgress, String> {
     let mut progress = HashProgress::default();
-    for cid in cids {
+    for (index, cid) in cids.iter().enumerate() {
         check()?;
+        report(&format!("{label}... {}/{}", index + 1, cids.len()));
         let page = if english_only.contains(cid) {
             fetch_card_page(fetch, cid, "en")
         } else {
@@ -197,6 +199,7 @@ fn update_new_sets(
     check()?;
     let mut result = json!({"new_cards":0,"new_hashes":0,"packs":0,"refreshed":0,
         "failed":[],"skipped_packs":[],"seeded":0,"pack_names":[],"pack_list_failed":false});
+    report("収録シリーズの一覧を確認中...");
     let all_packs = fetch_pack_list(fetch).unwrap_or_default();
     check()?;
     let already_known: HashSet<_> = known_packs.iter().cloned().collect();
@@ -227,7 +230,14 @@ fn update_new_sets(
     // First-run seeding may have changed known_packs above.
     let known: HashSet<_> = known_packs.iter().cloned().collect();
     if !missing.is_empty() {
-        let progress = update_hashes(fetch, hashes, &missing, &english_only, check)?;
+        let progress = update_hashes(
+            fetch,
+            hashes,
+            &missing,
+            &english_only,
+            "新しいカードを取得中",
+            check,
+        )?;
         result["new_cards"] = json!(progress.done);
         result["new_hashes"] = json!(progress.added);
         result["failed"] = json!(progress.failed);
@@ -282,7 +292,14 @@ fn update_new_sets(
         result["skipped_packs"] = json!(skipped);
     } else {
         if !todo.is_empty() {
-            let progress = update_hashes(fetch, hashes, &todo, &HashSet::new(), check)?;
+            let progress = update_hashes(
+                fetch,
+                hashes,
+                &todo,
+                &HashSet::new(),
+                "再録カードのイラストを確認中",
+                check,
+            )?;
             result["refreshed"] = json!(progress.done);
             result["new_hashes"] =
                 json!(result["new_hashes"].as_u64().unwrap_or(0) + progress.added as u64);
@@ -338,16 +355,20 @@ pub fn run(args: Vec<OsString>) -> Result<(), String> {
         i += 1;
     }
     let user_dir = user_dir.ok_or("--user-data ABS_DIR is required")?;
+    install_cancel_handler()?;
+    if verify_pack.is_none() {
+        println!("{}", update_new_sets_in(&user_dir, max_cards)?);
+        return Ok(());
+    }
     let user_dir = crate::paths::validate_user_data(&user_dir)?;
     let names = read_object(&user_dir.join("card_names.json"))
         .ok_or("card_names.json is required; run update-names first")?;
-    let cards = names["cards"]
+    names["cards"]
         .as_object()
         .ok_or("card_names.json has no cards")?;
     let user_file = user_dir.join("card_hashes_user.json");
     let user = read_object(&user_file);
-    let (mut hashes, mut packs) = loaded_hashes(user.as_ref())?;
-    install_cancel_handler()?;
+    let (mut hashes, packs) = loaded_hashes(user.as_ref())?;
     let mut fetch = HttpClient::new();
     let result = if let Some(pid) = verify_pack {
         let members = fetch_pack_cards(&mut fetch, &pid)?;
@@ -357,24 +378,44 @@ pub fn run(args: Vec<OsString>) -> Result<(), String> {
             &mut hashes,
             &members,
             &english_only,
+            "カード画像を取得中",
             &check_cancelled,
         )?;
         json!({"pack":pid,"members":members.len(),"cards":progress.done,
             "new_hashes":progress.added,"failed":progress.failed})
     } else {
-        update_new_sets(
-            &mut fetch,
-            &mut hashes,
-            &mut packs,
-            cards,
-            max_cards,
-            &check_cancelled,
-        )?
+        unreachable!("handled by update_new_sets_in")
     };
     check_cancelled()?;
     save_hashes_checked(&user_file, &hashes, &packs, check_cancelled)?;
     println!("{result}");
     Ok(())
+}
+
+/// 新しいカードと収録シリーズのハッシュを取り込み、user_dir の card_hashes_user.json を置き換える。
+/// 先に update_names で card_names.json を保存しておく必要がある。結果の集計を返す。
+pub fn update_new_sets_in(user_dir: &std::path::Path, max_cards: usize) -> Result<Value, String> {
+    let user_dir = crate::paths::validate_user_data(user_dir)?;
+    let names = read_object(&user_dir.join("card_names.json"))
+        .ok_or("card_names.json is required; run update-names first")?;
+    let cards = names["cards"]
+        .as_object()
+        .ok_or("card_names.json has no cards")?;
+    let user_file = user_dir.join("card_hashes_user.json");
+    let user = read_object(&user_file);
+    let (mut hashes, mut packs) = loaded_hashes(user.as_ref())?;
+    let mut fetch = HttpClient::new();
+    let result = update_new_sets(
+        &mut fetch,
+        &mut hashes,
+        &mut packs,
+        cards,
+        max_cards,
+        &check_cancelled,
+    )?;
+    check_cancelled()?;
+    save_hashes_checked(&user_file, &hashes, &packs, check_cancelled)?;
+    Ok(result)
 }
 
 #[cfg(test)]

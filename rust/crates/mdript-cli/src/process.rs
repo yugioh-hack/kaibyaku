@@ -17,7 +17,7 @@ use std::{
     path::{Path, PathBuf},
     sync::{
         Condvar, Mutex, MutexGuard,
-        atomic::{AtomicUsize, Ordering},
+        atomic::{AtomicBool, AtomicUsize, Ordering},
     },
     thread,
     time::Instant,
@@ -25,22 +25,67 @@ use std::{
 use unicode_normalization::UnicodeNormalization;
 const SKIPPED: &str = "同じイラストがすでにあるのでスキップ";
 #[derive(Clone)]
-struct Options {
-    output: PathBuf,
-    user_data: PathBuf,
-    format: String,
-    quality: f32,
-    rounded: bool,
-    recursive: bool,
-    duplicates: bool,
-    review: bool,
-    not_card: bool,
-    english: String,
-    split: String,
-    resolution: Resolution,
-    dry: bool,
-    csv: bool,
-    workers: usize,
+pub struct Options {
+    pub output: PathBuf,
+    pub user_data: PathBuf,
+    pub format: String,
+    pub quality: f32,
+    pub rounded: bool,
+    pub recursive: bool,
+    pub duplicates: bool,
+    pub review: bool,
+    pub not_card: bool,
+    pub english: String,
+    pub split: String,
+    pub resolution: Resolution,
+    pub dry: bool,
+    pub csv: bool,
+    pub workers: usize,
+}
+impl Options {
+    /// Python 版 Options と同じ既定値。
+    pub fn new(output: PathBuf, user_data: PathBuf) -> Self {
+        Self {
+            output,
+            user_data,
+            format: "webp".into(),
+            quality: 90.,
+            rounded: true,
+            recursive: true,
+            duplicates: true,
+            review: true,
+            not_card: true,
+            english: "name".into(),
+            split: "none".into(),
+            resolution: Resolution::Auto,
+            dry: false,
+            csv: true,
+            workers: thread::available_parallelism()
+                .map_or(4, |n| n.get())
+                .clamp(2, 8),
+        }
+    }
+    /// 出力先とユーザーデータを正規化し、互いに重ならず、本番の APPDATA/mdript とも重ならないことを確かめる。
+    pub fn validate_paths(&mut self) -> Result<(), String> {
+        if !self.output.is_absolute() || !self.user_data.is_absolute() {
+            return Err("output and user-data must be absolute paths".into());
+        }
+        self.output = resolved(&self.output)?;
+        self.user_data = resolved(&self.user_data)?;
+        if self.output == self.user_data
+            || self.output.starts_with(&self.user_data)
+            || self.user_data.starts_with(&self.output)
+        {
+            return Err("output and user-data must be separate directories".into());
+        }
+        if let Some(appdata) = std::env::var_os("APPDATA") {
+            let live = resolved(&PathBuf::from(appdata).join("mdript"))?;
+            if is_within(&self.output, &live) || is_within(&self.user_data, &live) {
+                return Err("prototype paths must be isolated from live APPDATA/mdript".into());
+            }
+        }
+        Ok(())
+    }
 }
 fn take_value(args: &[OsString], i: &mut usize) -> Result<OsString, String> {
     *i += 1;
@@ -52,25 +97,7 @@ fn parse(args: Vec<OsString>) -> Result<(Options, Vec<PathBuf>), String> {
     let mut output = None;
     let mut user = None;
     let mut paths = vec![];
-    let mut o = Options {
-        output: PathBuf::new(),
-        user_data: PathBuf::new(),
-        format: "webp".into(),
-        quality: 90.,
-        rounded: true,
-        recursive: true,
-        duplicates: true,
-        review: true,
-        not_card: true,
-        english: "name".into(),
-        split: "none".into(),
-        resolution: Resolution::Auto,
-        dry: false,
-        csv: true,
-        workers: thread::available_parallelism()
-            .map_or(4, |n| n.get())
-            .clamp(2, 8),
-    };
+    let mut o = Options::new(PathBuf::new(), PathBuf::new());
     let mut i = 0;
     let mut positional = false;
     let mut card = false;
@@ -175,23 +202,7 @@ fn parse(args: Vec<OsString>) -> Result<(Options, Vec<PathBuf>), String> {
     }
     o.output = output.ok_or("identify requires --output ABSOLUTE_DIRECTORY")?;
     o.user_data = user.ok_or("identify requires --user-data ABSOLUTE_DIRECTORY")?;
-    if !o.output.is_absolute() || !o.user_data.is_absolute() {
-        return Err("output and user-data must be absolute paths".into());
-    }
-    o.output = resolved(&o.output)?;
-    o.user_data = resolved(&o.user_data)?;
-    if o.output == o.user_data
-        || o.output.starts_with(&o.user_data)
-        || o.user_data.starts_with(&o.output)
-    {
-        return Err("output and user-data must be separate directories".into());
-    }
-    if let Some(appdata) = std::env::var_os("APPDATA") {
-        let live = resolved(&PathBuf::from(appdata).join("mdript"))?;
-        if is_within(&o.output, &live) || is_within(&o.user_data, &live) {
-            return Err("prototype paths must be isolated from live APPDATA/mdript".into());
-        }
-    }
+    o.validate_paths()?;
     if paths.is_empty() {
         return Err("identify requires at least one input".into());
     }
@@ -831,32 +842,62 @@ pub fn run(args: Vec<OsString>) -> Result<(), String> {
         return Ok(());
     }
     let (o, paths) = parse(args)?;
-    let paths = collect(paths, &o)?;
+    let summary = identify_paths(&o, paths, &AtomicBool::new(false), &|_, _, _| {})?;
+    println!("{summary}");
+    let error = summary["error"].as_u64().unwrap_or(0);
+    if error > 0 {
+        return Err(format!("{error} input(s) failed"));
+    }
+    Ok(())
+}
+
+/// 入力を集めて判定・保存し、件数と結果一覧の JSON を返す。
+/// `on_result(完了数, 全体数, 結果)` は画像1枚ごとに呼ばれる（完了順）。
+/// `cancel` が立った後の画像は処理せず、結果にも含めない（Python 版の should_stop と同じ）。
+pub fn identify_paths(
+    o: &Options,
+    inputs: Vec<PathBuf>,
+    cancel: &AtomicBool,
+    on_result: &(dyn Fn(usize, usize, &Value) + Sync),
+) -> Result<Value, String> {
+    let paths = collect(inputs, o)?;
     let started = Instant::now();
     let user = fs::read_to_string(o.user_data.join("card_hashes_user.json")).ok();
     let names = fs::read_to_string(o.user_data.join("card_names.json")).ok();
     let catalog = Catalog::bundled(user.as_deref(), names.as_deref())?;
     let sequencer = Sequencer::default();
     let next = AtomicUsize::new(0);
+    let done = AtomicUsize::new(0);
     let slots = Mutex::new(vec![None; paths.len()]);
     thread::scope(|scope| {
         for _ in 0..o.workers.min(paths.len()) {
             let paths = &paths;
             let catalog = &catalog;
-            let o = &o;
             let sequencer = &sequencer;
             let next = &next;
+            let done = &done;
             let slots = &slots;
             scope.spawn(move || {
                 loop {
                     let turn = next.fetch_add(1, Ordering::Relaxed);
                     let Some(path) = paths.get(turn) else { break };
+                    if cancel.load(Ordering::SeqCst) {
+                        // 順番だけ進め、結果には含めない
+                        let skipped = Ok(Prepared::complete(Value::Null));
+                        let _ =
+                            catch_unwind(AssertUnwindSafe(|| sequencer.finish(turn, skipped, o)));
+                        lock_recover(slots)[turn] = Some(Value::Null);
+                        continue;
+                    }
                     let prepared = catch_unwind(AssertUnwindSafe(|| prepare(path, catalog, o)))
                         .unwrap_or_else(|payload| Err(panic_message(payload)));
                     let result =
                         catch_unwind(AssertUnwindSafe(|| sequencer.finish(turn, prepared, o)))
                             .unwrap_or_else(|payload| Err(panic_message(payload)))
                             .unwrap_or_else(|error| error_result(path, error));
+                    let count = done.fetch_add(1, Ordering::SeqCst) + 1;
+                    let _ =
+                        catch_unwind(AssertUnwindSafe(|| on_result(count, paths.len(), &result)));
                     lock_recover(slots)[turn] = Some(result);
                 }
             });
@@ -875,6 +916,7 @@ pub fn run(args: Vec<OsString>) -> Result<(), String> {
                 )
             })
         })
+        .filter(|result| !result.is_null())
         .collect();
     let (mut confirmed, mut review, mut not_card, mut error, mut skipped) = (0, 0, 0, 0, 0);
     for r in &results {
@@ -891,14 +933,9 @@ pub fn run(args: Vec<OsString>) -> Result<(), String> {
     if o.csv && !o.dry && !results.is_empty() {
         let _ = crate::csv_log::write_csv(&o.output, &results);
     }
-    println!(
-        "{}",
-        json!({"confirmed":confirmed,"review":review,"not_card":not_card,"error":error,"skipped":skipped,"seconds":started.elapsed().as_secs_f64(),"results":results,"catalog_hashes":catalog.hash_count()})
-    );
-    if error > 0 {
-        return Err(format!("{error} input(s) failed"));
-    }
-    Ok(())
+    Ok(
+        json!({"confirmed":confirmed,"review":review,"not_card":not_card,"error":error,"skipped":skipped,"seconds":started.elapsed().as_secs_f64(),"total":paths.len(),"cancelled":cancel.load(Ordering::SeqCst),"results":results,"catalog_hashes":catalog.hash_count()}),
+    )
 }
 
 #[cfg(test)]

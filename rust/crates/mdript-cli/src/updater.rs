@@ -30,6 +30,36 @@ pub(crate) fn install_cancel_handler() -> Result<(), String> {
         .clone()
 }
 
+type ProgressSink = Box<dyn Fn(&str) + Send>;
+static PROGRESS: std::sync::Mutex<Option<ProgressSink>> = std::sync::Mutex::new(None);
+
+/// 更新処理の進捗表示先を差し替える（画面から呼ぶ。None で表示しない）。
+pub fn set_progress(sink: Option<ProgressSink>) {
+    *PROGRESS
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner()) = sink;
+}
+
+pub(crate) fn report(message: &str) {
+    if let Some(sink) = PROGRESS
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner())
+        .as_ref()
+    {
+        sink(message);
+    }
+}
+
+/// 画面の「中止」から更新を止める。
+pub fn request_cancel() {
+    CANCELLED.store(true, Ordering::SeqCst);
+}
+
+/// 次の更新を始める前に中止の状態を戻す。
+pub fn reset_cancel() {
+    CANCELLED.store(false, Ordering::SeqCst);
+}
+
 pub(crate) fn check_cancelled() -> Result<(), String> {
     if CANCELLED.load(Ordering::SeqCst) {
         Err("更新を中断しました".into())
@@ -201,6 +231,11 @@ impl Fetch for HttpClient {
 }
 
 fn fetch_name_list(fetch: &mut impl Fetch, locale: &str) -> Result<Vec<NameRow>, String> {
+    let label = if locale == "en" {
+        "英語版のカード名を確認中"
+    } else {
+        "カード名を取得中"
+    };
     let mut all = Vec::new();
     for page in 1..=60 {
         let url = format!(
@@ -211,6 +246,7 @@ fn fetch_name_list(fetch: &mut impl Fetch, locale: &str) -> Result<Vec<NameRow>,
         let rows = parse_rows(&html);
         let count = rows.len();
         all.extend(rows);
+        report(&format!("{label}... {} 件", all.len()));
         if count < PAGE_SIZE {
             break;
         }
@@ -258,6 +294,16 @@ fn save_names(user_dir: &Path, cards: &Map<String, Value>, fetched: &str) -> Res
     fs::rename(temporary, path).map_err(|e| e.to_string())
 }
 
+/// 公式DBからカード名を取得し、user_dir の card_names.json を置き換える。保存した件数を返す。
+pub fn update_names(user_dir: &Path) -> Result<usize, String> {
+    let user_dir = crate::paths::validate_user_data(user_dir)?;
+    let cards = fetch_card_names(&mut HttpClient::new())?;
+    check_cancelled()?;
+    let fetched = chrono::Local::now().format("%Y-%m-%d %H:%M").to_string();
+    save_names(&user_dir, &cards, &fetched)?;
+    Ok(cards.len())
+}
+
 pub fn run_names(args: Vec<OsString>) -> Result<(), String> {
     if args.len() == 1 && args[0] == "--help" {
         println!("mdript-cli update-names --user-data ABS_DIR");
@@ -266,16 +312,11 @@ pub fn run_names(args: Vec<OsString>) -> Result<(), String> {
     if args.len() != 2 || args[0] != "--user-data" {
         return Err("usage: mdript-cli update-names --user-data ABS_DIR".into());
     }
-    let user_dir = PathBuf::from(&args[1]);
-    let user_dir = crate::paths::validate_user_data(&user_dir)?;
     install_cancel_handler()?;
-    let cards = fetch_card_names(&mut HttpClient::new())?;
-    check_cancelled()?;
-    let fetched = chrono::Local::now().format("%Y-%m-%d %H:%M").to_string();
-    save_names(&user_dir, &cards, &fetched)?;
+    let count = update_names(&PathBuf::from(&args[1]))?;
     println!(
         "{}",
-        json!({"message":format!("カード名 {} 件を保存しました",cards.len()),"count":cards.len()})
+        json!({"message":format!("カード名 {count} 件を保存しました"),"count":count})
     );
     Ok(())
 }
