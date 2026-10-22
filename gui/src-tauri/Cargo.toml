@@ -1,0 +1,34 @@
+[package]
+name = "mdript-gui"
+version = "0.1.0"
+description = "MasterDuel切り抜きツール"
+edition = "2024"
+license = "MIT"
+
+[lib]
+# The `_lib` suffix keeps the lib name distinct from the bin name on Windows.
+name = "mdript_gui_lib"
+crate-type = ["rlib"]
+
+[[bin]]
+name = "mdript"
+path = "src/main.rs"
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+mdript-cli = { path = "../../rust/crates/mdript-cli" }
+mdript-core = { path = "../../rust/crates/mdript-core" }
+tauri = { version = "2", features = [] }
+tauri-plugin-dialog = "2"
+serde = { version = "1", features = ["derive"] }
+serde_json = { version = "1", features = ["preserve_order"] }
+
+[profile.release]
+codegen-units = 1
+lto = true
+opt-level = 3
+# 画像1枚ごとの panic 復帰（mdript-cli）に unwind が必要。abort にするとビルドが止まる。
+panic = "unwind"
+strip = true

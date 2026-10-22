@@ -65,6 +65,30 @@ pub(crate) fn loaded_hashes(
     Ok((hashes, packs))
 }
 
+/// 照合データの件数（カード種類数・ハッシュ数・カード名の件数と取得日時）。画面の表示用。
+pub fn data_summary(user_dir: &Path) -> Value {
+    let user = read_object(&user_dir.join("card_hashes_user.json"));
+    let (cards, hashes) = loaded_hashes(user.as_ref()).map_or((0, 0), |(map, _)| {
+        let hashes = map
+            .values()
+            .filter_map(Value::as_array)
+            .map(|list| list.iter().filter(|h| valid_hash(h).is_some()).count())
+            .sum::<usize>();
+        (map.len(), hashes)
+    });
+    let names = read_object(&user_dir.join("card_names.json"));
+    let name_count = names
+        .as_ref()
+        .and_then(|n| n["cards"].as_object())
+        .map_or(0, |c| c.len());
+    let fetched = names
+        .as_ref()
+        .and_then(|n| n["meta"]["fetched"].as_str())
+        .unwrap_or("")
+        .to_owned();
+    json!({"cards":cards,"hashes":hashes,"names":name_count,"names_fetched":fetched})
+}
+
 pub(crate) fn save_hashes(
     path: &Path,
     hashes: &Map<String, Value>,
