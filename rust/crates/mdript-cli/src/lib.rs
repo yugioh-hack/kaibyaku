@@ -10,3 +10,5 @@ mod paths;
 pub mod process;
 pub mod updater;
 pub mod updater_hash;
+
+pub use paths::validate_user_data;

@@ -37,7 +37,8 @@ fn user_dir() -> Result<PathBuf, String> {
     let base = std::env::var_os("APPDATA").ok_or("APPDATA が見つかりません")?;
     let dir = PathBuf::from(base).join(USER_DIR_NAME);
     fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
-    Ok(dir)
+    // ジャンクション等で現行版の %APPDATA%\mdript を指していたら使わない
+    mdript_cli::validate_user_data(&dir)
 }
 
 fn default_output() -> String {
@@ -334,7 +335,10 @@ fn remove_review_copy(path: String, output: String) -> Result<(), String> {
         return Err("削除できない場所です".into());
     }
     for ext in ["webp", "png"] {
-        let sibling = parent.join(stem).with_extension(ext);
+        // with_extension だと "Mr. X" の ". X" を拡張子とみなして別のファイルを消すので、名前に足す
+        let mut name = stem.to_os_string();
+        name.push(format!(".{ext}"));
+        let sibling = parent.join(name);
         if sibling.is_file() {
             fs::remove_file(&sibling).map_err(|e| e.to_string())?;
         }
@@ -543,6 +547,9 @@ mod tests {
             en.join("c.webp"),
             root.join("d.webp"),
             review.join("e.txt"),
+            review.join("Mr. X.webp"),
+            review.join("Mr. X.png"),
+            review.join("Mr.webp"),
         ] {
             fs::write(path, b"x").unwrap();
         }
@@ -551,6 +558,9 @@ mod tests {
         remove(review.join("a.webp")).unwrap();
         assert!(!review.join("a.webp").exists() && !review.join("a.png").exists());
         assert!(review.join("keep.webp").exists());
+        remove(review.join("Mr. X.webp")).unwrap();
+        assert!(!review.join("Mr. X.webp").exists() && !review.join("Mr. X.png").exists());
+        assert!(review.join("Mr.webp").exists());
         remove(not_card.join("b.webp")).unwrap();
         assert!(!not_card.join("b.webp").exists());
         assert!(remove(en.join("c.webp")).is_err());

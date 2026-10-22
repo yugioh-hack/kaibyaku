@@ -41,7 +41,7 @@ pub(crate) fn is_within(path: &Path, base: &Path) -> bool {
     true
 }
 
-pub(crate) fn validate_user_data(path: &Path) -> Result<PathBuf, String> {
+pub fn validate_user_data(path: &Path) -> Result<PathBuf, String> {
     if !path.is_absolute() {
         return Err("--user-data must be absolute".into());
     }

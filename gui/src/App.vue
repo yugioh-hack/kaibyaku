@@ -224,6 +224,7 @@ async function register(cid: string) {
       const out = output.value.trim();
       const fresh = await invoke<IdentifyResult>("identify_one", { path: row.source, args: identifyArgs(out) });
       const old = row.saved_path;
+      if (rows.value[index] !== row) return; // 一覧が入れ替わっていたら書き戻さない
       rows.value[index] = fresh;
       triggerRef(rows);
       closePanel();
@@ -254,7 +255,8 @@ function onKey(e: KeyboardEvent) {
 
 // ---- 入力 ----
 async function guardBusy(): Promise<boolean> {
-  if (!busy.value) return false;
+  // 登録（learn → 判定し直し）の途中も処理中として扱い、一覧を空にさせない
+  if (!busy.value && !registering.value) return false;
   await message("いま処理中です。終わるまでお待ちください。");
   return true;
 }
