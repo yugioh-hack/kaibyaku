@@ -6,6 +6,7 @@ use std::{
     io::Read,
     path::{Path, PathBuf},
     sync::OnceLock,
+    sync::atomic::{AtomicBool, Ordering},
     thread,
     time::{Duration, Instant},
 };
@@ -17,6 +18,25 @@ const UA: &str = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (
 const MAX_RESPONSE: u64 = 32 * 1024 * 1024;
 const INTERVAL: Duration = Duration::from_millis(400);
 const PAGE_SIZE: usize = 2000;
+static CANCELLED: AtomicBool = AtomicBool::new(false);
+static CANCEL_HANDLER: OnceLock<Result<(), String>> = OnceLock::new();
+
+pub(crate) fn install_cancel_handler() -> Result<(), String> {
+    CANCEL_HANDLER
+        .get_or_init(|| {
+            ctrlc::set_handler(|| CANCELLED.store(true, Ordering::SeqCst))
+                .map_err(|error| error.to_string())
+        })
+        .clone()
+}
+
+pub(crate) fn check_cancelled() -> Result<(), String> {
+    if CANCELLED.load(Ordering::SeqCst) {
+        Err("更新を中断しました".into())
+    } else {
+        Ok(())
+    }
+}
 
 fn pattern(source: &'static str) -> &'static Regex {
     static ROW: OnceLock<Regex> = OnceLock::new();
@@ -118,6 +138,7 @@ impl HttpClient {
     fn one(&mut self, url: &str, referer: Option<&str>) -> Result<Vec<u8>, String> {
         let mut current = url.to_owned();
         for _ in 0..=10 {
+            check_cancelled()?;
             allowed_url(&current)?;
             if let Some(last) = self.last_request {
                 let remaining = INTERVAL.saturating_sub(last.elapsed());
@@ -155,6 +176,7 @@ impl HttpClient {
             if bytes.len() as u64 > MAX_RESPONSE {
                 return Err("応答が大きすぎます".into());
             }
+            check_cancelled()?;
             return Ok(bytes);
         }
         Err("リダイレクト回数が多すぎます".into())
@@ -165,6 +187,7 @@ impl Fetch for HttpClient {
     fn get(&mut self, url: &str, referer: Option<&str>) -> Result<Vec<u8>, String> {
         let mut last = String::new();
         for attempt in 0..3 {
+            check_cancelled()?;
             match self.one(url, referer) {
                 Ok(bytes) => return Ok(bytes),
                 Err(error) => last = error,
@@ -228,6 +251,10 @@ fn save_names(user_dir: &Path, cards: &Map<String, Value>, fetched: &str) -> Res
         serde_json::to_vec(&data).map_err(|e| e.to_string())?,
     )
     .map_err(|e| e.to_string())?;
+    if let Err(error) = check_cancelled() {
+        let _ = fs::remove_file(&temporary);
+        return Err(error);
+    }
     if path.exists() {
         #[cfg(windows)]
         {
@@ -264,7 +291,9 @@ pub fn run_names(args: Vec<OsString>) -> Result<(), String> {
             return Err("live APPDATA/mdript is not allowed".into());
         }
     }
+    install_cancel_handler()?;
     let cards = fetch_card_names(&mut HttpClient::new())?;
+    check_cancelled()?;
     let fetched = chrono::Local::now().format("%Y-%m-%d %H:%M").to_string();
     save_names(&user_dir, &cards, &fetched)?;
     println!(

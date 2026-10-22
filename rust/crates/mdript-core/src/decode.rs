@@ -1,5 +1,9 @@
 use image::{DynamicImage, Rgb, RgbImage};
-use std::{fs, io::BufReader, path::Path};
+use std::{
+    fs,
+    io::{BufRead, BufReader, Cursor, Seek},
+    path::Path,
+};
 
 /// Bounded decoder shared by the hash command and the identification pipeline.
 /// JPEG pixel differences from Pillow are tracked in the compatibility report.
@@ -8,9 +12,19 @@ pub fn load_rgb(path: &Path) -> Result<RgbImage, String> {
     if file.metadata().map_err(|e| e.to_string())?.len() > 512 * 1024 * 1024 {
         return Err("compressed image exceeds 512 MiB".into());
     }
-    let mut reader = image::ImageReader::new(BufReader::new(file))
-        .with_guessed_format()
-        .map_err(|e| e.to_string())?;
+    decode(image::ImageReader::new(BufReader::new(file)))
+}
+
+/// Decode an in-memory official image using exactly the local-file limits and conversion.
+pub fn load_rgb_bytes(bytes: &[u8]) -> Result<RgbImage, String> {
+    if bytes.len() as u64 > 512 * 1024 * 1024 {
+        return Err("compressed image exceeds 512 MiB".into());
+    }
+    decode(image::ImageReader::new(Cursor::new(bytes)))
+}
+
+fn decode<R: BufRead + Seek>(reader: image::ImageReader<R>) -> Result<RgbImage, String> {
+    let mut reader = reader.with_guessed_format().map_err(|e| e.to_string())?;
     let mut limits = image::Limits::default();
     limits.max_image_width = Some(16384);
     limits.max_image_height = Some(16384);

@@ -10,7 +10,7 @@ use std::{
 const BUNDLED: &str = include_str!("../../../../data/card_hashes.json");
 static WRITE_LOCK: OnceLock<Mutex<()>> = OnceLock::new();
 
-fn read_object(path: &Path) -> Option<Value> {
+pub(crate) fn read_object(path: &Path) -> Option<Value> {
     let value = serde_json::from_str::<Value>(&fs::read_to_string(path).ok()?).ok()?;
     value.is_object().then_some(value)
 }
@@ -32,7 +32,9 @@ fn within_distance(existing: &str, candidate: &str, min_distance: u32) -> bool {
         .is_some_and(|(a, b)| (a ^ b).count_ones() < min_distance)
 }
 
-fn loaded_hashes(user: Option<&Value>) -> Result<(Map<String, Value>, Vec<String>), String> {
+pub(crate) fn loaded_hashes(
+    user: Option<&Value>,
+) -> Result<(Map<String, Value>, Vec<String>), String> {
     let base: Value = serde_json::from_str(BUNDLED).map_err(|e| e.to_string())?;
     let mut hashes = base["hashes"].as_object().cloned().unwrap_or_default();
     let mut packs = Vec::new();
@@ -63,7 +65,20 @@ fn loaded_hashes(user: Option<&Value>) -> Result<(Map<String, Value>, Vec<String
     Ok((hashes, packs))
 }
 
-fn save_hashes(path: &Path, hashes: &Map<String, Value>, packs: &[String]) -> Result<(), String> {
+pub(crate) fn save_hashes(
+    path: &Path,
+    hashes: &Map<String, Value>,
+    packs: &[String],
+) -> Result<(), String> {
+    save_hashes_checked(path, hashes, packs, || Ok(()))
+}
+
+pub(crate) fn save_hashes_checked(
+    path: &Path,
+    hashes: &Map<String, Value>,
+    packs: &[String],
+    check: impl Fn() -> Result<(), String>,
+) -> Result<(), String> {
     let base: Value = serde_json::from_str(BUNDLED).map_err(|e| e.to_string())?;
     let base = base["hashes"].as_object();
     let mut extra = Map::new();
@@ -88,6 +103,10 @@ fn save_hashes(path: &Path, hashes: &Map<String, Value>, packs: &[String]) -> Re
         .map_err(|e| e.to_string())?;
     let temporary = path.with_file_name("card_hashes_user.json.tmp");
     fs::write(&temporary, bytes).map_err(|e| e.to_string())?;
+    if let Err(error) = check() {
+        let _ = fs::remove_file(&temporary);
+        return Err(error);
+    }
     if let Err(error) = fs::rename(&temporary, path) {
         #[cfg(windows)]
         {
@@ -234,5 +253,21 @@ mod tests {
         assert!(!within_distance(zero, one, 1));
         assert!(within_distance(zero, one, 2));
         assert!(within_distance(&format!("{zero}{zero}"), one, 2));
+    }
+
+    #[test]
+    fn interrupted_save_keeps_previous_file_and_removes_temporary() {
+        let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("../../local-results")
+            .join(format!("learn-interrupt-{}", std::process::id()))
+            .join("isolated-user-data");
+        fs::create_dir_all(&root).unwrap();
+        let path = root.join("card_hashes_user.json");
+        fs::write(&path, b"previous").unwrap();
+        let (hashes, packs) = loaded_hashes(None).unwrap();
+        let result = save_hashes_checked(&path, &hashes, &packs, || Err("cancelled".into()));
+        assert!(result.is_err());
+        assert_eq!(fs::read(&path).unwrap(), b"previous");
+        assert!(!root.join("card_hashes_user.json.tmp").exists());
     }
 }

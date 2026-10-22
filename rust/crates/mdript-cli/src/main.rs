@@ -8,6 +8,7 @@ mod hash_cli;
 mod learn;
 mod process;
 mod updater;
+mod updater_hash;
 use serde_json::json;
 use std::process::ExitCode;
 fn main() -> ExitCode {
@@ -18,6 +19,8 @@ fn main() -> ExitCode {
         learn::run(args.into_iter().skip(1).collect())
     } else if args.first().is_some_and(|s| s == "update-names") {
         updater::run_names(args.into_iter().skip(1).collect())
+    } else if args.first().is_some_and(|s| s == "update-hashes") {
+        updater_hash::run(args.into_iter().skip(1).collect())
     } else {
         hash_cli::run()
     };
