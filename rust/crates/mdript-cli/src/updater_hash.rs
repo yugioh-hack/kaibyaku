@@ -194,18 +194,18 @@ fn update_new_sets(
     let mut result = json!({"new_cards":0,"new_hashes":0,"packs":0,"refreshed":0,
         "failed":[],"skipped_packs":[],"seeded":0,"pack_names":[],"pack_list_failed":false});
     let all_packs = fetch_pack_list(fetch).unwrap_or_default();
-    let known: HashSet<_> = known_packs.iter().cloned().collect();
+    let already_known: HashSet<_> = known_packs.iter().cloned().collect();
     let mut new_packs = if all_packs.is_empty() {
         result["pack_list_failed"] = json!(true);
         Vec::new()
-    } else if known.is_empty() {
+    } else if already_known.is_empty() {
         *known_packs = all_packs.iter().map(|pack| pack.pid.clone()).collect();
         result["seeded"] = json!(all_packs.len());
         Vec::new()
     } else {
         all_packs
             .iter()
-            .filter(|pack| !known.contains(&pack.pid))
+            .filter(|pack| !already_known.contains(&pack.pid))
             .cloned()
             .collect()
     };
@@ -219,6 +219,8 @@ fn update_new_sets(
         .filter(|(_, card)| card["l"] == "en")
         .map(|(cid, _)| cid.clone())
         .collect();
+    // First-run seeding may have changed known_packs above.
+    let known: HashSet<_> = known_packs.iter().cloned().collect();
     if !missing.is_empty() {
         let progress = update_hashes(fetch, hashes, &missing, &english_only);
         result["new_cards"] = json!(progress.done);
@@ -434,6 +436,58 @@ mod tests {
         assert_eq!(result["seeded"], 1);
         assert_eq!(result["refreshed"], 0);
         assert_eq!(packs, vec!["11"]);
+    }
+    #[test]
+    fn update_branches_match_python_golden_summaries() {
+        let golden: Value = serde_json::from_str(include_str!(
+            "../tests/fixtures/update-new-sets-golden.json"
+        ))
+        .unwrap();
+        for case in [
+            "initial_seed_with_missing_card",
+            "new_card_in_known_pack",
+            "new_pack_reprint",
+            "pack_list_failure",
+            "max_cards_exceeded",
+        ] {
+            let mut fetch = fixture();
+            let mut hashes =
+                Map::from_iter([("4138".into(), json!(["00000000000000000000000000000000"]))]);
+            let mut packs =
+                if case == "initial_seed_with_missing_card" || case == "pack_list_failure" {
+                    Vec::new()
+                } else if case == "new_card_in_known_pack" {
+                    vec!["11".into()]
+                } else {
+                    vec!["10".into()]
+                };
+            let mut cards = Map::from_iter([("4138".into(), json!({"n":"Sample"}))]);
+            if matches!(
+                case,
+                "initial_seed_with_missing_card" | "new_card_in_known_pack" | "pack_list_failure"
+            ) {
+                cards.insert("99999".into(), json!({"n":"New"}));
+            }
+            if case == "new_pack_reprint" {
+                cards.insert("99999".into(), json!({"n":"Reprint"}));
+                hashes.insert("99999".into(), json!(["00000000000000000000000000000000"]));
+                let row = include_str!("../tests/fixtures/pack-cards.html");
+                fetch.pages.insert(
+                    "pack".into(),
+                    format!("{row}{}", row.replace("4138", "99999")).into_bytes(),
+                );
+            }
+            if case == "pack_list_failure" {
+                fetch.pages.remove("list");
+            }
+            let max_cards = if case == "max_cards_exceeded" {
+                0
+            } else {
+                4000
+            };
+            let result = update_new_sets(&mut fetch, &mut hashes, &mut packs, &cards, max_cards);
+            assert_eq!(result, golden[case], "{case}");
+        }
     }
     #[test]
     fn card_page_uses_central_hash_image_and_deduplicates_ciid() {
