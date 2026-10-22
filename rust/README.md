@@ -42,6 +42,7 @@ cargo fmt --manifest-path rust/Cargo.toml --all --check
 Rustの31テストと`cargo fmt --all --check`、`cargo clippy --workspace --all-targets --locked -- -D warnings`は通過。panicを差し込むテストは子プロセスに10秒の制限を設け、判定・保存・mutex poison後も後続の画像とJSONが返ることを確認します。既存のPython版75テストも移植前の検証で通過しています。独立レビュー用の`tools/review_reference.py`、`review_compare.py`、`review_scenarios.py`、`review_safety.py`で次を再確認しました。
 
 - 実スクリーンショット256枚: 状態・カードID・名前・言語・備考は全件一致。距離か2位との差だけ8枚で不一致（最大4）。主因はJPEGデコードの画素差。全件の厳密一致判定は248/256。
+- JPEG差の境界分析: 距離16から3以内の画像は140枚ですが、確定判定を変える距離32・差4などの境界から3以内は0枚。状態変更までの最小変化量は5で、元画像256件と720p・JPEG50・ウィンドウ模擬12件に状態の入れ替わりはありません。全画像の値と境界距離は`rust/jpeg-boundary-report.json`、一覧と解釈は`docs/rust-prototype-decision.md`に記録しています。
 - 4枚を720p、JPEG50、ウィンドウ模擬へ変形した12ケース: 全項目一致（11確定、1カードなし）。
 - 合成入力の5設定×12画像: 状態・ID・名前・保存名・出力画像の復号画素が全件一致。特殊な中央ハッシュ、枠色、英語版、重複、壊れた画像、角丸、both形式を含む。
 - 引数拒否と4プロセスの同時保存など8項目は通過。
