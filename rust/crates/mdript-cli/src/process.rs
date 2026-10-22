@@ -31,6 +31,7 @@ struct Options {
     split: String,
     resolution: Resolution,
     dry: bool,
+    csv: bool,
 }
 fn take_value(args: &[OsString], i: &mut usize) -> Result<OsString, String> {
     *i += 1;
@@ -56,6 +57,7 @@ fn parse(args: Vec<OsString>) -> Result<(Options, Vec<PathBuf>), String> {
         split: "none".into(),
         resolution: Resolution::Auto,
         dry: false,
+        csv: true,
     };
     let mut i = 0;
     let mut positional = false;
@@ -135,6 +137,7 @@ fn parse(args: Vec<OsString>) -> Result<(Options, Vec<PathBuf>), String> {
             "--no-review" => o.review = false,
             "--no-not-card" => o.not_card = false,
             "--dry-run" => o.dry = true,
+            "--no-csv" => o.csv = false,
             _ if arg.starts_with('-') => return Err(format!("unknown option: {arg}")),
             _ => paths.push(PathBuf::from(&args[i])),
         }
@@ -585,7 +588,7 @@ fn process(
 pub fn run(args: Vec<OsString>) -> Result<(), String> {
     if args.len() == 1 && args[0] == "--help" {
         println!(
-            "mdript-cli identify PATH... --output ABS_DIR --user-data ABS_DIR [--format webp|png|both] [--quality 1..100] [--resolution auto|fixed|WxH] [--card|--box L T R B] [--english name|ja|off] [--split none|en|both] [--dry-run] [--keep-duplicates] [--no-rounded] [--no-recursive] [--no-review] [--no-not-card]\nUser data is optional read-only copied card_names.json/card_hashes_user.json. No implicit APPDATA access. JSON summary on stdout; errors exit 1."
+            "mdript-cli identify PATH... --output ABS_DIR --user-data ABS_DIR [--format webp|png|both] [--quality 1..100] [--resolution auto|fixed|WxH] [--card|--box L T R B] [--english name|ja|off] [--split none|en|both] [--dry-run] [--no-csv] [--keep-duplicates] [--no-rounded] [--no-recursive] [--no-review] [--no-not-card]\nUser data is optional read-only copied card_names.json/card_hashes_user.json. No implicit APPDATA access. JSON summary on stdout; errors exit 1."
         );
         return Ok(());
     }
@@ -612,6 +615,9 @@ pub fn run(args: Vec<OsString>) -> Result<(), String> {
             skipped += 1;
         }
         results.push(r);
+    }
+    if o.csv && !o.dry && !results.is_empty() {
+        let _ = crate::csv_log::write_csv(&o.output, &results);
     }
     println!(
         "{}",
@@ -660,6 +666,7 @@ mod tests {
             split: "none".into(),
             resolution: Resolution::Auto,
             dry: false,
+            csv: true,
         }
     }
     #[test]

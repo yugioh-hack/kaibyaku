@@ -61,7 +61,7 @@ def main():
         expected=[asdict(r) for r in summary.results]
         record={"case":label,"python":expected}
         if args.exe:
-            cmd=[str(args.exe.resolve()),"identify",str(inputs),"--output",str(rsout),"--user-data",str(user),"--format",options.save_format]
+            cmd=[str(args.exe.resolve()),"identify",str(inputs),"--output",str(rsout),"--user-data",str(user),"--format",options.save_format,"--no-csv"]
             if label=="split":cmd += ["--split","both"]
             if label=="no-rounded":cmd += ["--no-rounded"]
             if label=="no-not-card":cmd += ["--no-not-card"]

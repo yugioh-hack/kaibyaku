@@ -1,3 +1,4 @@
+mod csv_log;
 mod hash_cli;
 mod process;
 use serde_json::json;
