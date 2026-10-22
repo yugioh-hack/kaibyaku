@@ -48,6 +48,8 @@ Rustの29テストと`cargo fmt --all --check`、`cargo clippy --workspace --all
 
 今回の比較結果の詳細はGit管理外の`rust/local-results/parallel-review/`に保存（Python参照結果は`rust/local-results/current/reference.json`）。実画像の比較スクリプトは、既知のJPEG差8件があるため終了コード1を返します。Rust CLI自体は終了コード0で256件を処理しました。JPEGの全画素一致はまだ達成していません。試したlibjpeg-turbo Rust連携はこの環境にCMakeがないためビルドできず、完成コードには入れていません。
 
+256枚の通し処理も計測しました。1ワーカーではPython中央値131.11秒、Rust中央値72.62秒（1.81倍）、既定の8ワーカーでは23.39秒と11.31秒（2.07倍）でした。起動から終了まで、ウォームアップ後に各5回測り、毎回空の出力先を使用しました。状態件数は確定256・重複スキップ4、保存名252件が全条件で一致。測定20回のJSON・CSVも、日時・出力先パスと既知のJPEG差8件の距離・2位との差を除いて一致しました。最後の回は全条件で約半分の時間になっており、最小値には環境要因の可能性があります。全測定値と照合結果は`rust/benchmark-e2e.json`、解釈は`docs/rust-prototype-decision.md`に記録しています。
+
 単色・ほぼ単色の領域は DCT 係数が丸め誤差だけになるため、Python 版とハッシュが一致しない（照合結果への影響はなし）
 
 エラー時の結果 JSON・CSV の備考は、Python 版の「例外の型名: メッセージ」と文言が異なります。画像処理の成否や他の入力の処理継続には影響しません。
@@ -56,6 +58,6 @@ Rustの29テストと`cargo fmt --all --check`、`cargo clippy --workspace --all
 
 ## 未実装
 
-名前・ハッシュDBの更新、`--learn`、Tauri/Vue GUIは未実装。ユーザーデータを製品版でどう移行するかも今後決めます。現行Python版の安全性修正を含む機能を移植し、全検証画像の厳密な結果比較と通し処理の速度を測ってから置き換えを判断します。
+名前・ハッシュDBの更新、`--learn`、Tauri/Vue GUIは未実装。ユーザーデータを製品版でどう移行するかも今後決めます。通し処理の速度は測定済みですが、JPEG差8枚の厳密一致、GUIの起動時間・配布サイズ・メモリは未確認です。これらを確認してから置き換えを判断します。
 
 縮小・DCT実装の出発点は利用者提供の「mdriptのRust検討案.md」。Pillow Resample.c由来コードの許諾表示は`third-party/Pillow-LICENSE.txt`にあります。
