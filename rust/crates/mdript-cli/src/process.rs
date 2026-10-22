@@ -12,6 +12,11 @@ use std::{
     fs::{self, File, OpenOptions},
     io::Write,
     path::{Path, PathBuf},
+    sync::{
+        Condvar, Mutex,
+        atomic::{AtomicUsize, Ordering},
+    },
+    thread,
     time::Instant,
 };
 use unicode_normalization::UnicodeNormalization;
@@ -32,6 +37,7 @@ struct Options {
     resolution: Resolution,
     dry: bool,
     csv: bool,
+    workers: usize,
 }
 fn take_value(args: &[OsString], i: &mut usize) -> Result<OsString, String> {
     *i += 1;
@@ -58,6 +64,9 @@ fn parse(args: Vec<OsString>) -> Result<(Options, Vec<PathBuf>), String> {
         resolution: Resolution::Auto,
         dry: false,
         csv: true,
+        workers: thread::available_parallelism()
+            .map_or(4, |n| n.get())
+            .clamp(2, 8),
     };
     let mut i = 0;
     let mut positional = false;
@@ -138,6 +147,15 @@ fn parse(args: Vec<OsString>) -> Result<(Options, Vec<PathBuf>), String> {
             "--no-not-card" => o.not_card = false,
             "--dry-run" => o.dry = true,
             "--no-csv" => o.csv = false,
+            "--workers" => {
+                o.workers = take_value(&args, &mut i)?
+                    .to_string_lossy()
+                    .parse()
+                    .map_err(|_| "--workers must be 1..256")?;
+                if !(1..=256).contains(&o.workers) {
+                    return Err("--workers must be 1..256".into());
+                }
+            }
             _ if arg.starts_with('-') => return Err(format!("unknown option: {arg}")),
             _ => paths.push(PathBuf::from(&args[i])),
         }
@@ -391,22 +409,39 @@ fn encode(
 fn rounded_image(card: &RgbImage, enabled: bool) -> RgbaImage {
     rounded(card, enabled)
 }
+#[derive(Default)]
 struct Saver {
     hashes: HashMap<PathBuf, String>,
+    pending: HashSet<PathBuf>,
+}
+struct Reservation {
+    paths: Vec<PathBuf>,
+    owned: Vec<(PathBuf, File)>,
+    hash: String,
+}
+enum Choice {
+    Reserved(Reservation),
+    Skipped,
+    Wait,
+}
+impl Reservation {
+    fn write(&mut self, card: &RgbImage, o: &Options, round: bool) -> Result<(), String> {
+        let bytes = encode(card, o, round)?;
+        for ((_, file), (_, bytes)) in self.owned.iter_mut().zip(bytes) {
+            file.write_all(&bytes).map_err(|e| e.to_string())?;
+            file.flush().map_err(|e| e.to_string())?;
+        }
+        Ok(())
+    }
 }
 impl Saver {
-    fn save(
+    fn reserve(
         &mut self,
-        card: &RgbImage,
         target: &Path,
         name: &str,
         hash: Option<&str>,
         o: &Options,
-        round: bool,
-    ) -> Result<(String, String), String> {
-        if o.dry {
-            return Ok((String::new(), String::new()));
-        }
+    ) -> Result<Choice, String> {
         if !resolved(target)?.starts_with(&o.output) {
             return Err("output directory resolves outside isolated output root".into());
         }
@@ -427,6 +462,9 @@ impl Saver {
                 .iter()
                 .map(|e| target.join(format!("{stem}.{e}")))
                 .collect();
+            if paths.iter().any(|p| self.pending.contains(p)) {
+                return Ok(Choice::Wait);
+            }
             let taken: Vec<_> = paths.iter().filter(|p| p.exists()).collect();
             if taken.is_empty() {
                 let mut owned: Vec<(PathBuf, File)> = vec![];
@@ -450,25 +488,12 @@ impl Saver {
                 if retry {
                     continue;
                 }
-                let result = (|| {
-                    let bytes = encode(card, o, round)?;
-                    for ((_, file), (_, bytes)) in owned.iter_mut().zip(bytes) {
-                        file.write_all(&bytes).map_err(|e| e.to_string())?;
-                        file.flush().map_err(|e| e.to_string())?;
-                    }
-                    Ok::<_, String>(())
-                })();
-                if let Err(e) = result {
-                    for (p, file) in owned {
-                        drop(file);
-                        let _ = fs::remove_file(p);
-                    }
-                    return Err(e);
-                }
-                for (p, _) in owned {
-                    self.hashes.insert(p, hash.unwrap_or("").into());
-                }
-                return Ok((display_path(&paths[0]), String::new()));
+                self.pending.extend(paths.iter().cloned());
+                return Ok(Choice::Reserved(Reservation {
+                    paths,
+                    owned,
+                    hash: hash.unwrap_or("").into(),
+                }));
             }
             if o.duplicates
                 && let Some(hash) = hash
@@ -493,30 +518,90 @@ impl Saver {
                         u128::from_str_radix(hash, 16),
                     ) && (a ^ b).count_ones() <= 10
                     {
-                        return Ok((String::new(), SKIPPED.into()));
+                        return Ok(Choice::Skipped);
                     }
                 }
             }
         }
         unreachable!()
     }
+    fn complete(&mut self, reservation: Reservation, success: bool) {
+        let Reservation { paths, owned, hash } = reservation;
+        drop(owned);
+        if success {
+            for path in &paths {
+                self.hashes.insert(path.clone(), hash.clone());
+            }
+        } else {
+            for path in &paths {
+                let _ = fs::remove_file(path);
+            }
+        }
+        for path in paths {
+            self.pending.remove(&path);
+        }
+    }
+    #[cfg(test)]
+    fn save(
+        &mut self,
+        card: &RgbImage,
+        target: &Path,
+        name: &str,
+        hash: Option<&str>,
+        o: &Options,
+        round: bool,
+    ) -> Result<(String, String), String> {
+        if o.dry {
+            return Ok((String::new(), String::new()));
+        }
+        let mut reservation = match self.reserve(target, name, hash, o)? {
+            Choice::Reserved(r) => r,
+            Choice::Skipped => return Ok((String::new(), SKIPPED.into())),
+            Choice::Wait => return Err("unexpected pending reservation".into()),
+        };
+        let path = display_path(&reservation.paths[0]);
+        let written = reservation.write(card, o, round);
+        self.complete(reservation, written.is_ok());
+        written.map(|()| (path, String::new()))
+    }
 }
-fn process(
-    path: &Path,
-    catalog: &Catalog,
-    o: &Options,
-    saver: &mut Saver,
-) -> Result<Value, String> {
+struct SaveTask {
+    card: RgbImage,
+    target: PathBuf,
+    name: String,
+    hash: Option<String>,
+    round: bool,
+    propagate_skip: bool,
+}
+struct Prepared {
+    result: Value,
+    save: Option<SaveTask>,
+}
+impl Prepared {
+    fn complete(result: Value) -> Self {
+        Self { result, save: None }
+    }
+}
+fn prepare(path: &Path, catalog: &Catalog, o: &Options) -> Result<Prepared, String> {
     let im = load_image(path)?;
     let mut result = json!({"source":path,"status":"カードなし","card_id":"","name":"","distance":999,"margin":0,"saved_path":"","note":"","english":false,"box":null,"origin":null,"hash":null,"ranked":[],"stroke_ratio":null});
     let stem = path.file_stem().unwrap_or_default().to_string_lossy();
     let Some(found) = identify(&im, catalog, &o.resolution) else {
-        if o.not_card {
-            let (saved, _) = saver.save(&im, &o.output.join("not_card"), &stem, None, o, false)?;
-            result["saved_path"] = json!(saved);
-        }
         result["note"] = json!("照合できる画像がありません");
-        return Ok(result);
+        if o.not_card {
+            return Ok(Prepared {
+                result,
+                save: Some(SaveTask {
+                    card: im,
+                    target: o.output.join("not_card"),
+                    name: stem.into_owned(),
+                    hash: None,
+                    round: false,
+                    propagate_skip: false,
+                }),
+            });
+        }
+        return Ok(Prepared::complete(result));
     };
     result["distance"] = json!(found.distance);
     result["margin"] = json!(found.margin);
@@ -530,26 +615,23 @@ fn process(
     result["ranked"] = json!(found.ranked);
     let card = found.card(&im);
     if found.distance > 36 {
+        result["note"] = json!("カードの拡大画面ではないようです");
         if o.not_card {
-            let (saved, note) = saver.save(
-                &card,
-                &o.output.join("not_card"),
-                &stem,
-                Some(&found.hash),
-                o,
-                o.rounded,
-            )?;
-            result["saved_path"] = json!(saved);
-            result["note"] = json!(if note.is_empty() {
-                "カードの拡大画面ではないようです"
-            } else {
-                &note
+            return Ok(Prepared {
+                result,
+                save: Some(SaveTask {
+                    card,
+                    target: o.output.join("not_card"),
+                    name: stem.into_owned(),
+                    hash: Some(found.hash),
+                    round: o.rounded,
+                    propagate_skip: true,
+                }),
             });
         } else {
-            result["note"] = json!("カードの拡大画面ではないようです");
             result["margin"] = json!(0);
         }
-        return Ok(result);
+        return Ok(Prepared::complete(result));
     }
     let cid = frame_twin(&card, &found.card_id);
     let japanese = catalog.display_name(&cid, false);
@@ -578,7 +660,7 @@ fn process(
     result["english"] = json!(english);
     if !confirmed && !o.review {
         result["note"] = json!("要確認のため保存しませんでした");
-        return Ok(result);
+        return Ok(Prepared::complete(result));
     }
     let mut target = if confirmed {
         o.output.clone()
@@ -592,15 +674,101 @@ fn process(
             target.push("ja");
         }
     }
-    let (saved, skipped) = saver.save(&card, &target, &name, Some(&found.hash), o, o.rounded)?;
-    result["saved_path"] = json!(saved);
-    result["note"] = json!(if skipped.is_empty() { note } else { skipped });
-    Ok(result)
+    result["note"] = json!(note);
+    Ok(Prepared {
+        result,
+        save: Some(SaveTask {
+            card,
+            target,
+            name,
+            hash: Some(found.hash),
+            round: o.rounded,
+            propagate_skip: true,
+        }),
+    })
+}
+#[derive(Default)]
+struct SequenceState {
+    next_turn: usize,
+    saver: Saver,
+}
+#[derive(Default)]
+struct Sequencer {
+    state: Mutex<SequenceState>,
+    changed: Condvar,
+}
+impl Sequencer {
+    fn finish(
+        &self,
+        turn: usize,
+        prepared: Result<Prepared, String>,
+        o: &Options,
+    ) -> Result<Value, String> {
+        let mut state = self.state.lock().unwrap();
+        while state.next_turn != turn {
+            state = self.changed.wait(state).unwrap();
+        }
+        let Prepared { mut result, save } = match prepared {
+            Ok(value) => value,
+            Err(error) => {
+                state.next_turn += 1;
+                self.changed.notify_all();
+                return Err(error);
+            }
+        };
+        let Some(task) = save else {
+            state.next_turn += 1;
+            self.changed.notify_all();
+            return Ok(result);
+        };
+        if o.dry {
+            state.next_turn += 1;
+            self.changed.notify_all();
+            return Ok(result);
+        }
+        let mut reservation = loop {
+            match state
+                .saver
+                .reserve(&task.target, &task.name, task.hash.as_deref(), o)
+            {
+                Ok(Choice::Wait) => state = self.changed.wait(state).unwrap(),
+                Ok(Choice::Skipped) => {
+                    state.next_turn += 1;
+                    self.changed.notify_all();
+                    if task.propagate_skip {
+                        result["note"] = json!(SKIPPED);
+                    }
+                    return Ok(result);
+                }
+                Ok(Choice::Reserved(reservation)) => break reservation,
+                Err(error) => {
+                    state.next_turn += 1;
+                    self.changed.notify_all();
+                    return Err(error);
+                }
+            }
+        };
+        state.next_turn += 1;
+        self.changed.notify_all();
+        drop(state);
+
+        let saved_path = display_path(&reservation.paths[0]);
+        let written = reservation.write(&task.card, o, task.round);
+        let mut state = self.state.lock().unwrap();
+        state.saver.complete(reservation, written.is_ok());
+        self.changed.notify_all();
+        written?;
+        result["saved_path"] = json!(saved_path);
+        Ok(result)
+    }
+}
+fn error_result(path: &Path, error: String) -> Value {
+    json!({"source":path,"status":"エラー","card_id":"","name":"","distance":999,"margin":0,"saved_path":"","note":error,"english":false})
 }
 pub fn run(args: Vec<OsString>) -> Result<(), String> {
     if args.len() == 1 && args[0] == "--help" {
         println!(
-            "mdript-cli identify PATH... --output ABS_DIR --user-data ABS_DIR [--format webp|png|both] [--quality 1..100] [--resolution auto|fixed|WxH] [--card|--box L T R B] [--english name|ja|off] [--split none|en|both] [--dry-run] [--no-csv] [--keep-duplicates] [--no-rounded] [--no-recursive] [--no-review] [--no-not-card]\nUser data is optional read-only copied card_names.json/card_hashes_user.json. No implicit APPDATA access. JSON summary on stdout; errors exit 1."
+            "mdript-cli identify PATH... --output ABS_DIR --user-data ABS_DIR [--format webp|png|both] [--quality 1..100] [--resolution auto|fixed|WxH] [--card|--box L T R B] [--english name|ja|off] [--split none|en|both] [--workers 1..256] [--dry-run] [--no-csv] [--keep-duplicates] [--no-rounded] [--no-recursive] [--no-review] [--no-not-card]\nUser data is optional read-only copied card_names.json/card_hashes_user.json. No implicit APPDATA access. JSON summary on stdout; errors exit 1."
         );
         return Ok(());
     }
@@ -610,13 +778,38 @@ pub fn run(args: Vec<OsString>) -> Result<(), String> {
     let user = fs::read_to_string(o.user_data.join("card_hashes_user.json")).ok();
     let names = fs::read_to_string(o.user_data.join("card_names.json")).ok();
     let catalog = Catalog::bundled(user.as_deref(), names.as_deref())?;
-    let mut saver = Saver {
-        hashes: HashMap::new(),
-    };
-    let mut results = vec![];
+    let sequencer = Sequencer::default();
+    let next = AtomicUsize::new(0);
+    let slots = Mutex::new(vec![None; paths.len()]);
+    thread::scope(|scope| {
+        for _ in 0..o.workers.min(paths.len()) {
+            let paths = &paths;
+            let catalog = &catalog;
+            let o = &o;
+            let sequencer = &sequencer;
+            let next = &next;
+            let slots = &slots;
+            scope.spawn(move || {
+                loop {
+                    let turn = next.fetch_add(1, Ordering::Relaxed);
+                    let Some(path) = paths.get(turn) else { break };
+                    let prepared = prepare(path, catalog, o);
+                    let result = sequencer
+                        .finish(turn, prepared, o)
+                        .unwrap_or_else(|e| error_result(path, e));
+                    slots.lock().unwrap()[turn] = Some(result);
+                }
+            });
+        }
+    });
+    let results: Vec<Value> = slots
+        .into_inner()
+        .unwrap()
+        .into_iter()
+        .map(Option::unwrap)
+        .collect();
     let (mut confirmed, mut review, mut not_card, mut error, mut skipped) = (0, 0, 0, 0, 0);
-    for path in paths {
-        let r=process(&path,&catalog,&o,&mut saver).unwrap_or_else(|e|json!({"source":path,"status":"エラー","card_id":"","name":"","distance":999,"margin":0,"saved_path":"","note":e,"english":false}));
+    for r in &results {
         match r["status"].as_str() {
             Some("確定") => confirmed += 1,
             Some("要確認") => review += 1,
@@ -626,7 +819,6 @@ pub fn run(args: Vec<OsString>) -> Result<(), String> {
         if r["note"] == SKIPPED {
             skipped += 1;
         }
-        results.push(r);
     }
     if o.csv && !o.dry && !results.is_empty() {
         let _ = crate::csv_log::write_csv(&o.output, &results);
@@ -679,6 +871,7 @@ mod tests {
             resolution: Resolution::Auto,
             dry: false,
             csv: true,
+            workers: 1,
         }
     }
     #[test]
@@ -747,6 +940,12 @@ mod tests {
         let mut bad = args.clone();
         bad.extend([OsString::from("--quality"), OsString::from("NaN")]);
         assert!(parse(bad).is_err());
+        let mut one = args.clone();
+        one.extend([OsString::from("--workers"), OsString::from("1")]);
+        assert_eq!(parse(one).unwrap().0.workers, 1);
+        let mut bad = args.clone();
+        bad.extend([OsString::from("--workers"), OsString::from("0")]);
+        assert!(parse(bad).is_err());
         assert!(parse(vec!["image.png".into()]).is_err());
     }
     #[test]
@@ -759,12 +958,10 @@ mod tests {
             let o = o.clone();
             let card = card.clone();
             joins.push(std::thread::spawn(move || {
-                Saver {
-                    hashes: HashMap::new(),
-                }
-                .save(&card, &o.output, "same", None, &o, false)
-                .unwrap()
-                .0
+                Saver::default()
+                    .save(&card, &o.output, "same", None, &o, false)
+                    .unwrap()
+                    .0
             }));
         }
         let paths: Vec<_> = joins.into_iter().map(|j| j.join().unwrap()).collect();
@@ -783,13 +980,48 @@ mod tests {
         fs::create_dir_all(&o.output).unwrap();
         let existing = o.output.join("keep.webp");
         fs::write(&existing, b"existing").unwrap();
-        let err = Saver {
-            hashes: HashMap::new(),
-        }
-        .save(&RgbImage::new(40, 60), &o.output, "broken", None, &o, true);
+        let err =
+            Saver::default().save(&RgbImage::new(40, 60), &o.output, "broken", None, &o, true);
         assert!(err.is_err());
         assert_eq!(fs::read(&existing).unwrap(), b"existing");
         assert_eq!(fs::read_dir(&o.output).unwrap().count(), 1);
+    }
+    #[test]
+    fn failed_pending_save_releases_base_name_for_next_turn() {
+        let temp = Temp::new();
+        let mut bad = options(&temp);
+        bad.format = "both".into();
+        bad.quality = -1.;
+        let mut good = bad.clone();
+        good.quality = 90.;
+        let sequencer = Sequencer::default();
+        let card = RgbImage::from_pixel(40, 60, image::Rgb([12, 34, 56]));
+        let make_task = |card: RgbImage| Prepared {
+            result: json!({"status":"要確認","saved_path":"","note":""}),
+            save: Some(SaveTask {
+                card,
+                target: good.output.clone(),
+                name: "same".into(),
+                hash: None,
+                round: true,
+                propagate_skip: true,
+            }),
+        };
+        std::thread::scope(|scope| {
+            let first = scope.spawn(|| sequencer.finish(0, Ok(make_task(card.clone())), &bad));
+            let second = scope.spawn(|| sequencer.finish(1, Ok(make_task(card.clone())), &good));
+            assert!(first.join().unwrap().is_err());
+            let result = second.join().unwrap().unwrap();
+            assert!(
+                result["saved_path"]
+                    .as_str()
+                    .unwrap()
+                    .ends_with("same.webp")
+            );
+        });
+        assert!(good.output.join("same.webp").exists());
+        assert!(good.output.join("same.png").exists());
+        assert_eq!(fs::read_dir(&good.output).unwrap().count(), 2);
     }
     #[test]
     fn duplicates_are_checked_across_instances() {
@@ -798,16 +1030,12 @@ mod tests {
         o.duplicates = true;
         let card = RgbImage::new(40, 60);
         let hash = "0".repeat(32);
-        let first = Saver {
-            hashes: HashMap::new(),
-        }
-        .save(&card, &o.output, "card", Some(&hash), &o, false)
-        .unwrap();
-        let second = Saver {
-            hashes: HashMap::new(),
-        }
-        .save(&card, &o.output, "card", Some(&hash), &o, false)
-        .unwrap();
+        let first = Saver::default()
+            .save(&card, &o.output, "card", Some(&hash), &o, false)
+            .unwrap();
+        let second = Saver::default()
+            .save(&card, &o.output, "card", Some(&hash), &o, false)
+            .unwrap();
         assert!(!first.0.is_empty());
         assert_eq!(second, (String::new(), SKIPPED.into()));
     }
@@ -816,11 +1044,9 @@ mod tests {
         let temp = Temp::new();
         let mut o = options(&temp);
         o.dry = true;
-        Saver {
-            hashes: HashMap::new(),
-        }
-        .save(&RgbImage::new(40, 60), &o.output, "x", None, &o, true)
-        .unwrap();
+        Saver::default()
+            .save(&RgbImage::new(40, 60), &o.output, "x", None, &o, true)
+            .unwrap();
         assert!(!o.output.exists());
         assert!(!o.user_data.exists());
     }
@@ -830,11 +1056,9 @@ mod tests {
         let o = options(&temp);
         let outside = temp.0.join("outside/new");
         assert!(
-            Saver {
-                hashes: HashMap::new()
-            }
-            .save(&RgbImage::new(40, 60), &outside, "x", None, &o, true)
-            .is_err()
+            Saver::default()
+                .save(&RgbImage::new(40, 60), &outside, "x", None, &o, true)
+                .is_err()
         );
         assert!(!outside.exists());
     }
