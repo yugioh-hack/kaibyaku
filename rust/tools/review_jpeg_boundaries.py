@@ -70,9 +70,9 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--reference", type=Path, required=True)
     parser.add_argument("--compare", type=Path, required=True)
-    parser.add_argument("--transformed-reference", type=Path, required=True)
-    parser.add_argument("--transformed-compare", type=Path, required=True)
-    parser.add_argument("--scenarios", type=Path, required=True)
+    parser.add_argument("--transformed-reference", type=Path)
+    parser.add_argument("--transformed-compare", type=Path)
+    parser.add_argument("--scenarios", type=Path)
     parser.add_argument("--user-data", type=Path, required=True)
     parser.add_argument("--report", type=Path, required=True)
     parser.add_argument("--markdown", type=Path, required=True)
@@ -80,11 +80,10 @@ def main():
     args.user_data.mkdir(parents=True, exist_ok=True)
     reference = json.loads(args.reference.read_text(encoding="utf-8"))
     compare = json.loads(args.compare.read_text(encoding="utf-8"))
-    transformed_reference = json.loads(args.transformed_reference.read_text(encoding="utf-8"))
-    transformed_compare = json.loads(args.transformed_compare.read_text(encoding="utf-8"))
-    scenarios = json.loads(args.scenarios.read_text(encoding="utf-8"))
-    if compare["exact_result_matches"] != 248 or len(compare["differences"]) != 8:
-        raise ValueError("native comparison is not the expected 248/256 with eight differences")
+    if bool(args.transformed_reference) != bool(args.transformed_compare):
+        parser.error("transformed reference and comparison must be supplied together")
+    if compare["reference_count"] != reference["count"] or compare["rust_count"] != reference["count"]:
+        raise ValueError("native comparison does not cover every reference image")
     with patch("mdript.catalog.user_data_dir", return_value=str(args.user_data)):
         catalog = Catalog()
     cropper = Cropper(catalog, Options(output_dir=str(args.user_data.parent / "unused-output"), workers=1))
@@ -122,13 +121,21 @@ def main():
         rows.append({"file": name, **values, "near_within_3": near, "near_labels": labels, "python_frame_switch_eligible_if_above_16": switch_eligible})
         if index % 50 == 0:
             print(f"Boundary analysis {index}/{len(python_rows)}", flush=True)
-    scenario_cases = sum(len(case["python"]) for case in scenarios)
-    scenario_swaps = [
-        {"case": case["case"], "file": name}
-        for case in scenarios
-        for name, py in by_source(case["python"]).items()
-        if py["status"] != by_source(case["rust"])[name]["status"]
-    ]
+    observed_swaps = {"native": status_swaps(reference, compare)}
+    if args.transformed_reference:
+        transformed_reference = json.loads(args.transformed_reference.read_text(encoding="utf-8"))
+        transformed_compare = json.loads(args.transformed_compare.read_text(encoding="utf-8"))
+        observed_swaps["transformed"] = status_swaps(transformed_reference, transformed_compare)
+    if args.scenarios:
+        scenarios = json.loads(args.scenarios.read_text(encoding="utf-8"))
+        scenario_cases = sum(len(case["python"]) for case in scenarios)
+        scenario_swaps = [
+            {"case": case["case"], "file": name}
+            for case in scenarios
+            for name, py in by_source(case["python"]).items()
+            if py["status"] != by_source(case["rust"])[name]["status"]
+        ]
+        observed_swaps["synthetic_scenarios"] = {"cases": scenario_cases, "count": len(scenario_swaps), "files": scenario_swaps}
     report = {
         "definition": "Absolute integer gap <=3 to each listed threshold, using each side's own distance/margin/origin. estimated_switch_distance_16 is raw proximity only: frame-position and edge conditions also apply. minimum_status_change_linf is the smallest simultaneous max change in distance or margin that changes status at fixed origin.",
         "image_count": len(rows),
@@ -137,11 +144,7 @@ def main():
         "frame_switch_eligible_near_16_count": sum(row["python_frame_switch_eligible_if_above_16"] and "estimated_switch_distance_16" in row["near_labels"] for row in rows),
         "effective_status_change_within_3_count": sum(min(row[side]["minimum_status_change_linf"] for side in ("python", "rust")) <= 3 for row in rows),
         "minimum_effective_status_change": min(row[side]["minimum_status_change_linf"] for row in rows for side in ("python", "rust")),
-        "observed_status_swaps": {
-            "native": status_swaps(reference, compare),
-            "transformed": status_swaps(transformed_reference, transformed_compare),
-            "synthetic_scenarios": {"cases": scenario_cases, "count": len(scenario_swaps), "files": scenario_swaps},
-        },
+        "observed_status_swaps": observed_swaps,
         "rows": rows,
     }
     args.report.write_text(json.dumps(report, ensure_ascii=False, indent=2), encoding="utf-8")
