@@ -79,6 +79,12 @@ fn better(a: Option<Found>, b: Option<Found>) -> Option<Found> {
         (a, b) => a.or(b),
     }
 }
+/// The first usable trusted frame, matching Python's learn command.
+pub fn identify_trusted(im: &RgbImage, catalog: &Catalog) -> Option<Found> {
+    layout::trusted_boxes(im, &Resolution::Auto)
+        .into_iter()
+        .find_map(|b| evaluate(im, b, false, false, catalog))
+}
 pub fn identify(im: &RgbImage, catalog: &Catalog, resolution: &Resolution) -> Option<Found> {
     let mut best = None;
     for b in layout::trusted_boxes(im, resolution) {

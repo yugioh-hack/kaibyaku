@@ -5,6 +5,7 @@ compile_error!(
 
 mod csv_log;
 mod hash_cli;
+mod learn;
 mod process;
 use serde_json::json;
 use std::process::ExitCode;
@@ -12,6 +13,8 @@ fn main() -> ExitCode {
     let args: Vec<_> = std::env::args_os().skip(1).collect();
     let result = if args.first().is_some_and(|s| s == "identify") {
         process::run(args.into_iter().skip(1).collect())
+    } else if args.first().is_some_and(|s| s == "learn") {
+        learn::run(args.into_iter().skip(1).collect())
     } else {
         hash_cli::run()
     };

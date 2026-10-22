@@ -18,7 +18,15 @@ cargo build --release --manifest-path rust/Cargo.toml --locked --bin mdript-cli
 rust/target/release/mdript-cli.exe identify C:/images --output C:/tmp/mdript-rust-output --user-data C:/tmp/mdript-rust-user --format both
 ```
 
-`--output`と`--user-data`には**異なる絶対ディレクトリ**を指定します。後者は省略可能なコピー済み`card_names.json`と`card_hashes_user.json`の読み取り先で、存在しなくても動きます。普段の`%APPDATA%/mdript`は読み書きせず、その場所を指定しても拒否します。ユーザーデータの取得や更新はまだ実装していません。
+`--output`と`--user-data`には**異なる絶対ディレクトリ**を指定します。後者は省略可能なコピー済み`card_names.json`と`card_hashes_user.json`の読み取り先で、存在しなくても動きます。普段の`%APPDATA%/mdript`は読み書きせず、その場所を指定しても拒否します。
+
+画像1枚の照合用ハッシュは、隔離したユーザーデータへ追加できます:
+
+```powershell
+rust/target/release/mdript-cli.exe learn 4138 C:/images/shot.png --user-data C:/tmp/mdript-rust-user
+```
+
+学習はPython版と同じtrusted枠だけを使い、既に確定できるか同じハッシュがあれば追加しません。保存時は同梱DBとの差分だけを形式2のJSONに一時ファイル経由で原子的に置き換えます。同一プロセス内の学習はmutexで直列化し、ファイルの破損と更新の消失を防ぎます。複数プロセス間の同時学習は未調整です。
 
 既定はWebP品質90、角丸透過、再帰、重複スキップ、要確認・カードなしを保存、言語判別と日本語/英語名、`log.csv`への追記。ワーカー数の既定は`min(8, max(2, 論理CPU数))`で、`--workers 1..256`で指定できます。`--workers 1`は逐次処理です。`--format png|webp|both`、`--quality 1..100`、`--resolution auto|fixed|WxH`、`--english name|ja|off`、`--split none|en|both`、`--no-rounded`、`--no-recursive`、`--keep-duplicates`、`--no-review`、`--no-not-card`、`--no-csv`を使用できます。`--card`は画像全体をカードとして、`--box L T R B`は明示した枠を使います。`--dry-run`は判定だけ行い、出力ディレクトリ・画像・CSVを作りません。
 
@@ -41,12 +49,14 @@ cargo clippy --manifest-path rust/Cargo.toml --workspace --all-targets --locked 
 cargo fmt --manifest-path rust/Cargo.toml --all --check
 ```
 
-Rustの31テストと`cargo fmt --all --check`、`cargo clippy --workspace --all-targets --locked -- -D warnings`は通過。panicを差し込むテストは子プロセスに10秒の制限を設け、判定・保存・mutex poison後も後続の画像とJSONが返ることを確認します。既存のPython版75テストも移植前の検証で通過しています。独立レビュー用の`tools/review_reference.py`、`review_compare.py`、`review_scenarios.py`、`review_safety.py`で次を再確認しました。
+Rustの33テストと`cargo fmt --all --check`、`cargo clippy --workspace --all-targets --locked -- -D warnings`は通過。panicを差し込むテストは子プロセスに10秒の制限を設け、判定・保存・mutex poison後も後続の画像とJSONが返ることを確認します。既存のPython版75テストも移植前の検証で通過しています。独立レビュー用の`tools/review_reference.py`、`review_compare.py`、`review_scenarios.py`、`review_safety.py`で次を再確認しました。
 
 - 実スクリーンショット256枚: 状態・カードID・名前・言語・備考は全件一致。距離か2位との差だけ8枚で不一致（最大4）。主因はJPEGデコードの画素差。全件の厳密一致判定は248/256。
 - JPEG差の境界分析: 距離16から3以内の画像は140枚ですが、確定判定を変える距離32・差4などの境界から3以内は0枚。状態変更までの最小変化量は5で、元画像256件と720p・JPEG50・ウィンドウ模擬12件に状態の入れ替わりはありません。全画像の値と境界距離は`rust/jpeg-boundary-report.json`、一覧と解釈は`docs/rust-prototype-decision.md`に記録しています。
 - 4枚を720p、JPEG50、ウィンドウ模擬へ変形した12ケース: 全項目一致（11確定、1カードなし）。
 - 合成入力の5設定×12画像: 状態・ID・名前・保存名・出力画像の復号画素が全件一致。特殊な中央ハッシュ、枠色、英語版、重複、壊れた画像、角丸、both形式を含む。
+- 35枚の日英ペアを含む画像群: `--english name|ja|off`と`--split none|en`の6設定でPython版と保存名・備考・スキップ件数が一致。`off`では英語画像に`_alt1`が付き、スキップは0件。
+- 合成画像の学習: 新規・既存パック情報・旧形式・破損JSONの4設定でPython版と保存JSONが一致。同一プロセスで2件同時に学習してもJSONは有効で、ハッシュは1件だけ追加。
 - 引数拒否と4プロセスの同時保存など8項目は通過。
 
 今回の比較結果の詳細はGit管理外の`rust/local-results/parallel-review/`に保存（Python参照結果は`rust/local-results/current/reference.json`）。実画像の比較スクリプトは、既知のJPEG差8件があるため終了コード1を返します。Rust CLI自体は終了コード0で256件を処理しました。JPEGの全画素一致はまだ達成していません。試したlibjpeg-turbo Rust連携はこの環境にCMakeがないためビルドできず、完成コードには入れていません。
@@ -61,6 +71,6 @@ Rustの31テストと`cargo fmt --all --check`、`cargo clippy --workspace --all
 
 ## 未実装
 
-名前・ハッシュDBの更新、`--learn`、Tauri/Vue GUIは未実装。ユーザーデータを製品版でどう移行するかも今後決めます。通し処理の速度は測定済みですが、JPEG差8枚の厳密一致、GUIの起動時間・配布サイズ・メモリは未確認です。これらを確認してから置き換えを判断します。
+公式DBからの名前・ハッシュ更新、Tauri/Vue GUIは未実装。ユーザーデータを製品版でどう移行するかも今後決めます。通し処理の速度は測定済みですが、JPEG差8枚の厳密一致、GUIの起動時間・配布サイズ・メモリは未確認です。これらを確認してから置き換えを判断します。
 
 縮小・DCT実装の出発点は利用者提供の「mdriptのRust検討案.md」。Pillow Resample.c由来コードの許諾表示は`third-party/Pillow-LICENSE.txt`にあります。
