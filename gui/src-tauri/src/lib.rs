@@ -357,6 +357,38 @@ mod tests {
     }
 
     #[test]
+    fn identify_args_map_to_cli_options() {
+        let root = std::env::temp_dir().join(format!("mdript-gui-args-{}", std::process::id()));
+        let args = |output: &str, resolution: &str, format: &str| IdentifyArgs {
+            output: output.into(),
+            save_format: format.into(),
+            rounded: false,
+            recursive: false,
+            skip_duplicate: false,
+            save_review: false,
+            save_not_card: true,
+            english: "ja".into(),
+            split: "both".into(),
+            resolution: resolution.into(),
+        };
+        let out = root.join("out").to_string_lossy().into_owned();
+        let o = options(&args(&out, "1920x1080", "png"), root.join("user")).unwrap();
+        assert_eq!(o.format, "png");
+        assert!(!o.rounded && !o.recursive && !o.duplicates && !o.review && o.not_card);
+        assert_eq!((o.english.as_str(), o.split.as_str()), ("ja", "both"));
+        assert_eq!(
+            o.resolution,
+            mdript_core::layout::Resolution::Original(1920, 1080)
+        );
+        let auto = options(&args(&out, "auto", "webp"), root.join("user")).unwrap();
+        assert_eq!(auto.resolution, mdript_core::layout::Resolution::Auto);
+        assert!(options(&args("", "auto", "webp"), root.join("user")).is_err());
+        assert!(options(&args("relative", "auto", "webp"), root.join("user")).is_err());
+        assert!(options(&args(&out, "auto", "gif"), root.join("user")).is_err());
+        assert!(options(&args(&out, "axb", "webp"), root.join("user")).is_err());
+    }
+
+    #[test]
     fn update_message_matches_python_wording() {
         let seeded = json!({"seeded":3,"new_cards":0,"refreshed":0,"new_hashes":0,"packs":0,
             "pack_names":[],"failed":[],"pack_list_failed":false,"skipped_packs":[]});
