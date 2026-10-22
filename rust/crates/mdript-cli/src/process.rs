@@ -7,13 +7,15 @@ use mdript_core::{
 };
 use serde_json::{Value, json};
 use std::{
+    any::Any,
     collections::{HashMap, HashSet},
     ffi::OsString,
     fs::{self, File, OpenOptions},
     io::Write,
+    panic::{AssertUnwindSafe, catch_unwind},
     path::{Path, PathBuf},
     sync::{
-        Condvar, Mutex,
+        Condvar, Mutex, MutexGuard,
         atomic::{AtomicUsize, Ordering},
     },
     thread,
@@ -426,6 +428,14 @@ enum Choice {
 }
 impl Reservation {
     fn write(&mut self, card: &RgbImage, o: &Options, round: bool) -> Result<(), String> {
+        #[cfg(test)]
+        if std::env::var_os("MDRIPT_TEST_PANIC_WRITE").is_some() {
+            static PANICKED: std::sync::atomic::AtomicBool =
+                std::sync::atomic::AtomicBool::new(false);
+            if !PANICKED.swap(true, Ordering::SeqCst) {
+                panic!("injected write panic");
+            }
+        }
         let bytes = encode(card, o, round)?;
         for ((_, file), (_, bytes)) in self.owned.iter_mut().zip(bytes) {
             file.write_all(&bytes).map_err(|e| e.to_string())?;
@@ -583,6 +593,12 @@ impl Prepared {
     }
 }
 fn prepare(path: &Path, catalog: &Catalog, o: &Options) -> Result<Prepared, String> {
+    #[cfg(test)]
+    if std::env::var_os("MDRIPT_TEST_PANIC_PREPARE")
+        .is_some_and(|name| path.file_name() == Some(name.as_os_str()))
+    {
+        panic!("injected prepare panic");
+    }
     let im = load_image(path)?;
     let mut result = json!({"source":path,"status":"カードなし","card_id":"","name":"","distance":999,"margin":0,"saved_path":"","note":"","english":false,"box":null,"origin":null,"hash":null,"ranked":[],"stroke_ratio":null});
     let stem = path.file_stem().unwrap_or_default().to_string_lossy();
@@ -697,6 +713,74 @@ struct Sequencer {
     state: Mutex<SequenceState>,
     changed: Condvar,
 }
+fn lock_recover<T>(mutex: &Mutex<T>) -> MutexGuard<'_, T> {
+    mutex
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner())
+}
+fn wait_recover<'a, T>(changed: &Condvar, state: MutexGuard<'a, T>) -> MutexGuard<'a, T> {
+    changed
+        .wait(state)
+        .unwrap_or_else(|poisoned| poisoned.into_inner())
+}
+fn panic_message(payload: Box<dyn Any + Send>) -> String {
+    let detail = if let Some(message) = payload.downcast_ref::<String>() {
+        message.as_str()
+    } else if let Some(message) = payload.downcast_ref::<&str>() {
+        message
+    } else {
+        "non-string panic payload"
+    };
+    format!("panic: {detail}")
+}
+struct TurnGuard<'a> {
+    sequencer: &'a Sequencer,
+    turn: usize,
+    advanced: bool,
+}
+impl TurnGuard<'_> {
+    fn advance(&mut self, state: &mut SequenceState) {
+        if !self.advanced && state.next_turn == self.turn {
+            state.next_turn += 1;
+            self.advanced = true;
+            self.sequencer.changed.notify_all();
+        }
+    }
+}
+impl Drop for TurnGuard<'_> {
+    fn drop(&mut self) {
+        if self.advanced {
+            return;
+        }
+        let mut state = lock_recover(&self.sequencer.state);
+        while state.next_turn < self.turn {
+            state = wait_recover(&self.sequencer.changed, state);
+        }
+        self.advance(&mut state);
+    }
+}
+struct PendingGuard<'a> {
+    sequencer: &'a Sequencer,
+    reservation: Option<Reservation>,
+    success: bool,
+}
+impl PendingGuard<'_> {
+    fn write(&mut self, card: &RgbImage, o: &Options, round: bool) -> Result<(), String> {
+        self.reservation
+            .as_mut()
+            .expect("reservation remains owned until completion")
+            .write(card, o, round)
+    }
+}
+impl Drop for PendingGuard<'_> {
+    fn drop(&mut self) {
+        if let Some(reservation) = self.reservation.take() {
+            let mut state = lock_recover(&self.sequencer.state);
+            state.saver.complete(reservation, self.success);
+            self.sequencer.changed.notify_all();
+        }
+    }
+}
 impl Sequencer {
     fn finish(
         &self,
@@ -704,59 +788,57 @@ impl Sequencer {
         prepared: Result<Prepared, String>,
         o: &Options,
     ) -> Result<Value, String> {
-        let mut state = self.state.lock().unwrap();
-        while state.next_turn != turn {
-            state = self.changed.wait(state).unwrap();
-        }
-        let Prepared { mut result, save } = match prepared {
-            Ok(value) => value,
-            Err(error) => {
-                state.next_turn += 1;
-                self.changed.notify_all();
-                return Err(error);
-            }
+        let mut turn_guard = TurnGuard {
+            sequencer: self,
+            turn,
+            advanced: false,
         };
+        let mut state = lock_recover(&self.state);
+        while state.next_turn < turn {
+            state = wait_recover(&self.changed, state);
+        }
+        #[cfg(test)]
+        if turn == 0 && std::env::var_os("MDRIPT_TEST_PANIC_WITH_LOCK").is_some() {
+            panic!("injected mutex poison panic");
+        }
+        let Prepared { mut result, save } = prepared?;
         let Some(task) = save else {
-            state.next_turn += 1;
-            self.changed.notify_all();
             return Ok(result);
         };
         if o.dry {
-            state.next_turn += 1;
-            self.changed.notify_all();
             return Ok(result);
         }
-        let mut reservation = loop {
+        let reservation = loop {
             match state
                 .saver
                 .reserve(&task.target, &task.name, task.hash.as_deref(), o)
             {
-                Ok(Choice::Wait) => state = self.changed.wait(state).unwrap(),
+                Ok(Choice::Wait) => state = wait_recover(&self.changed, state),
                 Ok(Choice::Skipped) => {
-                    state.next_turn += 1;
-                    self.changed.notify_all();
                     if task.propagate_skip {
                         result["note"] = json!(SKIPPED);
                     }
                     return Ok(result);
                 }
                 Ok(Choice::Reserved(reservation)) => break reservation,
-                Err(error) => {
-                    state.next_turn += 1;
-                    self.changed.notify_all();
-                    return Err(error);
-                }
+                Err(error) => return Err(error),
             }
         };
-        state.next_turn += 1;
-        self.changed.notify_all();
+        turn_guard.advance(&mut state);
         drop(state);
 
         let saved_path = display_path(&reservation.paths[0]);
-        let written = reservation.write(&task.card, o, task.round);
-        let mut state = self.state.lock().unwrap();
-        state.saver.complete(reservation, written.is_ok());
-        self.changed.notify_all();
+        let mut pending = PendingGuard {
+            sequencer: self,
+            reservation: Some(reservation),
+            success: false,
+        };
+        let written = catch_unwind(AssertUnwindSafe(|| {
+            pending.write(&task.card, o, task.round)
+        }))
+        .unwrap_or_else(|payload| Err(panic_message(payload)));
+        pending.success = written.is_ok();
+        drop(pending);
         written?;
         result["saved_path"] = json!(saved_path);
         Ok(result)
@@ -793,20 +875,30 @@ pub fn run(args: Vec<OsString>) -> Result<(), String> {
                 loop {
                     let turn = next.fetch_add(1, Ordering::Relaxed);
                     let Some(path) = paths.get(turn) else { break };
-                    let prepared = prepare(path, catalog, o);
-                    let result = sequencer
-                        .finish(turn, prepared, o)
-                        .unwrap_or_else(|e| error_result(path, e));
-                    slots.lock().unwrap()[turn] = Some(result);
+                    let prepared = catch_unwind(AssertUnwindSafe(|| prepare(path, catalog, o)))
+                        .unwrap_or_else(|payload| Err(panic_message(payload)));
+                    let result =
+                        catch_unwind(AssertUnwindSafe(|| sequencer.finish(turn, prepared, o)))
+                            .unwrap_or_else(|payload| Err(panic_message(payload)))
+                            .unwrap_or_else(|error| error_result(path, error));
+                    lock_recover(slots)[turn] = Some(result);
                 }
             });
         }
     });
     let results: Vec<Value> = slots
         .into_inner()
-        .unwrap()
+        .unwrap_or_else(|poisoned| poisoned.into_inner())
         .into_iter()
-        .map(Option::unwrap)
+        .enumerate()
+        .map(|(turn, result)| {
+            result.unwrap_or_else(|| {
+                error_result(
+                    &paths[turn],
+                    "worker ended before producing a result".into(),
+                )
+            })
+        })
         .collect();
     let (mut confirmed, mut review, mut not_card, mut error, mut skipped) = (0, 0, 0, 0, 0);
     for r in &results {
@@ -836,7 +928,11 @@ pub fn run(args: Vec<OsString>) -> Result<(), String> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::sync::atomic::{AtomicU64, Ordering};
+    use std::{
+        process::{Command, Stdio},
+        sync::atomic::{AtomicU64, Ordering},
+        time::Duration,
+    };
     static SEQUENCE: AtomicU64 = AtomicU64::new(0);
     struct Temp(PathBuf);
     impl Temp {
@@ -872,6 +968,118 @@ mod tests {
             dry: false,
             csv: true,
             workers: 1,
+        }
+    }
+    #[test]
+    fn panic_test_child() {
+        let Some(root) = std::env::var_os("MDRIPT_TEST_PANIC_ROOT") else {
+            return;
+        };
+        let root = PathBuf::from(root);
+        let args = vec![
+            OsString::from("identify"),
+            root.join("input").into_os_string(),
+            OsString::from("--output"),
+            root.join("output").into_os_string(),
+            OsString::from("--user-data"),
+            root.join("user").into_os_string(),
+            OsString::from("--card"),
+            OsString::from("--format"),
+            OsString::from("png"),
+            OsString::from("--no-rounded"),
+            OsString::from("--keep-duplicates"),
+            OsString::from("--workers"),
+            OsString::from("8"),
+        ];
+        assert!(run(args).is_err());
+    }
+    #[test]
+    fn panics_release_turns_and_files_before_timeout() {
+        for scenario in ["prepare", "write", "poison"] {
+            let root = Temp::new();
+            let input = root.0.join("input");
+            let first = input.join("a");
+            let second = input.join("b");
+            fs::create_dir_all(&first).unwrap();
+            fs::create_dir_all(&second).unwrap();
+            let first_name = if scenario == "write" {
+                "same.png"
+            } else {
+                "bad.png"
+            };
+            let second_name = if scenario == "write" {
+                "same.png"
+            } else {
+                "good.png"
+            };
+            RgbImage::from_pixel(30, 40, image::Rgb([10, 20, 30]))
+                .save(first.join(first_name))
+                .unwrap();
+            RgbImage::from_pixel(30, 40, image::Rgb([40, 50, 60]))
+                .save(second.join(second_name))
+                .unwrap();
+            let mut command = Command::new(std::env::current_exe().unwrap());
+            command
+                .args(["--exact", "process::tests::panic_test_child", "--nocapture"])
+                .env("MDRIPT_TEST_PANIC_ROOT", &root.0)
+                .stdout(Stdio::piped())
+                .stderr(Stdio::piped());
+            match scenario {
+                "prepare" => {
+                    command.env("MDRIPT_TEST_PANIC_PREPARE", first_name);
+                }
+                "write" => {
+                    command.env("MDRIPT_TEST_PANIC_WRITE", "1");
+                }
+                "poison" => {
+                    command.env("MDRIPT_TEST_PANIC_WITH_LOCK", "1");
+                }
+                _ => unreachable!(),
+            }
+            let mut child = command.spawn().unwrap();
+            let started = Instant::now();
+            loop {
+                if child.try_wait().unwrap().is_some() {
+                    break;
+                }
+                if started.elapsed() > Duration::from_secs(10) {
+                    child.kill().unwrap();
+                    let _ = child.wait();
+                    panic!("{scenario}: child did not finish within 10 seconds");
+                }
+                thread::sleep(Duration::from_millis(20));
+            }
+            let output = child.wait_with_output().unwrap();
+            assert!(
+                output.status.success(),
+                "{scenario}: {} {}",
+                String::from_utf8_lossy(&output.stdout),
+                String::from_utf8_lossy(&output.stderr)
+            );
+            let stdout = String::from_utf8(output.stdout).unwrap();
+            let summary: Value = stdout
+                .lines()
+                .filter_map(|line| {
+                    line.find('{')
+                        .and_then(|start| serde_json::from_str(&line[start..]).ok())
+                })
+                .find(|value: &Value| value.get("results").is_some())
+                .expect("child printed result JSON");
+            assert_eq!(summary["error"], 1, "{scenario}");
+            let rows = summary["results"].as_array().unwrap();
+            assert_eq!(rows.len(), 2);
+            assert_eq!(rows[0]["status"], "エラー", "{scenario}");
+            assert!(rows[0]["note"].as_str().unwrap().contains("panic:"));
+            assert_ne!(rows[1]["status"], "エラー", "{scenario}");
+            let saved = PathBuf::from(rows[1]["saved_path"].as_str().unwrap());
+            assert!(saved.is_file(), "{scenario}: later image was not saved");
+            assert_eq!(saved.file_name().unwrap(), second_name, "{scenario}");
+            let files: Vec<_> = fs::read_dir(saved.parent().unwrap())
+                .unwrap()
+                .filter_map(Result::ok)
+                .filter(|entry| entry.path().extension().is_some_and(|ext| ext == "png"))
+                .collect();
+            assert_eq!(files.len(), 1, "{scenario}: failed reservation left a file");
         }
     }
     #[test]

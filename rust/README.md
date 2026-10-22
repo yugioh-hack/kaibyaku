@@ -22,7 +22,7 @@ rust/target/release/mdript-cli.exe identify C:/images --output C:/tmp/mdript-rus
 
 `log.csv`はPython版と同じ9列、UTF-8 BOM、CRLF、追記形式です。入力値が表計算ソフトで数式にならないよう先頭の記号を保護します。CSVの書き込みに失敗しても、画像の処理結果JSONは返します。
 
-標準出力は`confirmed/review/not_card/error/skipped/seconds/results`を含むJSONです。各結果にはPython版と同じ状態・ID・名前・距離・2位との差・保存先・備考・言語に加え、枠、枠の信頼区分、ハッシュ、候補、言語比を含みます。入力画像のエラーがあっても他の画像を処理し、結果一覧を返して終了コード1にします。画像判定は並列化し、保存名の予約・重複判定は入力順に進めます。先行画像の書き出しは待たず、同名の予約が残る場合のみ完了を待ちます。保存失敗時は予約と自分のファイルを清掃します。結果JSONとCSVの行順は入力順です。
+標準出力は`confirmed/review/not_card/error/skipped/seconds/results`を含むJSONです。各結果にはPython版と同じ状態・ID・名前・距離・2位との差・保存先・備考・言語に加え、枠、枠の信頼区分、ハッシュ、候補、言語比を含みます。入力画像のエラーがあっても他の画像を処理し、結果一覧を返して終了コード1にします。画像判定は並列化し、保存名の予約・重複判定は入力順に進めます。先行画像の書き出しは待たず、同名の予約が残る場合のみ完了を待ちます。保存失敗や判定・書き出し中のpanicはその画像のエラー結果に変え、順番待ちと予約を解放します。panicで中断した画像の予約ファイルも清掃します。結果JSONとCSVの行順は入力順です。
 
 従来の読み取り専用ハッシュ調査コマンドも使えます:
 
@@ -39,7 +39,7 @@ cargo clippy --manifest-path rust/Cargo.toml --workspace --all-targets --locked 
 cargo fmt --manifest-path rust/Cargo.toml --all --check
 ```
 
-Rustの29テストと`cargo fmt --all --check`、`cargo clippy --workspace --all-targets --locked -- -D warnings`は通過。既存のPython版75テストも移植前の検証で通過しています。独立レビュー用の`tools/review_reference.py`、`review_compare.py`、`review_scenarios.py`、`review_safety.py`で次を再確認しました。
+Rustの31テストと`cargo fmt --all --check`、`cargo clippy --workspace --all-targets --locked -- -D warnings`は通過。panicを差し込むテストは子プロセスに10秒の制限を設け、判定・保存・mutex poison後も後続の画像とJSONが返ることを確認します。既存のPython版75テストも移植前の検証で通過しています。独立レビュー用の`tools/review_reference.py`、`review_compare.py`、`review_scenarios.py`、`review_safety.py`で次を再確認しました。
 
 - 実スクリーンショット256枚: 状態・カードID・名前・言語・備考は全件一致。距離か2位との差だけ8枚で不一致（最大4）。主因はJPEGデコードの画素差。全件の厳密一致判定は248/256。
 - 4枚を720p、JPEG50、ウィンドウ模擬へ変形した12ケース: 全項目一致（11確定、1カードなし）。
