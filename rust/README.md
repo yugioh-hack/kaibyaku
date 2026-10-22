@@ -50,6 +50,8 @@ Rustの26テストと`cargo fmt --all --check`、`cargo clippy --workspace --all
 
 単色・ほぼ単色の領域は DCT 係数が丸め誤差だけになるため、Python 版とハッシュが一致しない（照合結果への影響はなし）
 
+エラー時の結果 JSON・CSV の備考は、Python 版の「例外の型名: メッセージ」と文言が異なります。画像処理の成否や他の入力の処理継続には影響しません。
+
 16bit PNGはPillow 12.2.0の読み込み・`convert("RGB")`結果に合わせています。グレースケール（PNG color type 0、Pillow `I;16`）は各値を255で切り捨て、LA・RGB・RGBA（color type 4・2・6、Pillowが8bit `RGBA`/`RGB`として開く）は下位8bitを落とし、アルファを無視します。各形式について0〜255の値と0〜65535の値で固定PNGを作り、Pythonの`artwork_phash_hex(Image.open(p).convert("RGB"))`と同じハッシュになることを確認しました。これら以外の16bit PNG形式・メタデータの組み合わせは未確認です。既存DBとの完全互換や製品版の速度は保証しません。
 
 ## 未実装

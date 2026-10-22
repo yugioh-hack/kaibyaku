@@ -201,6 +201,18 @@ fn resolved(path: &Path) -> Result<PathBuf, String> {
     }
     Ok(out)
 }
+fn display_path(path: &Path) -> String {
+    let text = path.to_string_lossy();
+    if let Some(unc) = text.strip_prefix(r"\\?\UNC\") {
+        format!(r"\\{unc}")
+    } else if let Some(local) = text.strip_prefix(r"\\?\")
+        && local.as_bytes().get(1) == Some(&b':')
+    {
+        local.to_owned()
+    } else {
+        text.into_owned()
+    }
+}
 pub(crate) fn load_image(path: &Path) -> Result<RgbImage, String> {
     mdript_core::decode::load_rgb(path)
 }
@@ -456,7 +468,7 @@ impl Saver {
                 for (p, _) in owned {
                     self.hashes.insert(p, hash.unwrap_or("").into());
                 }
-                return Ok((paths[0].to_string_lossy().into_owned(), String::new()));
+                return Ok((display_path(&paths[0]), String::new()));
             }
             if o.duplicates
                 && let Some(hash) = hash
@@ -701,6 +713,21 @@ mod tests {
         assert_eq!(safe_filename("\u{FA19}"), "神");
         assert_eq!(safe_filename("\n . "), "unknown");
         assert_eq!(safe_filename("a/b\\c"), "a／b￥c");
+    }
+    #[test]
+    fn display_path_keeps_drive_and_unc_paths_without_device_prefix() {
+        assert_eq!(
+            display_path(Path::new(r"\\?\C:\cards\one.webp")),
+            r"C:\cards\one.webp"
+        );
+        assert_eq!(
+            display_path(Path::new(r"\\?\UNC\host\share\one.webp")),
+            r"\\host\share\one.webp"
+        );
+        assert_eq!(
+            display_path(Path::new(r"C:\cards\one.webp")),
+            r"C:\cards\one.webp"
+        );
     }
     #[test]
     fn options_reject_unsafe_or_unknown() {
