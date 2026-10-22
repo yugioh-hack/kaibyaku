@@ -3,8 +3,8 @@ members = ["crates/mdript-core", "crates/mdript-cli"]
 resolver = "2"
 
 [workspace.dependencies]
-image = { version = "=0.25.10", default-features = false, features = ["png", "jpeg", "webp"] }
-serde_json = "1"
+image = { version = "=0.25.10", default-features = false, features = ["png", "jpeg", "webp", "bmp"] }
+serde_json = { version = "1", features = ["preserve_order"] }
 
 [profile.release]
 opt-level = 3

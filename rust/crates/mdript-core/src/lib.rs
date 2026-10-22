@@ -29,10 +29,11 @@ fn coeffs(
     in0: f64,
     in1: f64,
     out: usize,
+    bilinear: bool,
 ) -> (usize, Vec<(usize, usize)>, Vec<i32>) {
     let scale = (in1 - in0) / out as f64;
     let fscale = scale.max(1.0);
-    let support = 3.0 * fscale;
+    let support = (if bilinear { 1.0 } else { 3.0 }) * fscale;
     let ksize = support.ceil() as usize * 2 + 1;
     let mut bounds = Vec::with_capacity(out);
     let mut kk = vec![0i32; out * ksize];
@@ -42,7 +43,14 @@ fn coeffs(
         let xmin = ((center - support + 0.5) as i64).max(0) as usize;
         let xmax = ((center + support + 0.5) as i64).min(in_size as i64) as usize - xmin;
         let mut k: Vec<f64> = (0..xmax)
-            .map(|x| lanczos((x as f64 + xmin as f64 - center + 0.5) * ss))
+            .map(|x| {
+                let v = (x as f64 + xmin as f64 - center + 0.5) * ss;
+                if bilinear {
+                    (1.0 - v.abs()).max(0.0)
+                } else {
+                    lanczos(v)
+                }
+            })
             .collect();
         let ww: f64 = k.iter().sum();
         if ww != 0.0 {
@@ -75,8 +83,14 @@ fn clip8(v: i64) -> u8 {
 
 // Image.resize((ow, oh), LANCZOS) と同じ結果（横→縦、縦に必要な行だけ横を計算）
 fn resize_pillow(src: &Gray, ow: usize, oh: usize) -> Gray {
-    let (kh, bh, kkh) = coeffs(src.w, 0.0, src.w as f64, ow);
-    let (kv, mut bv, kkv) = coeffs(src.h, 0.0, src.h as f64, oh);
+    resize_filtered(src, ow, oh, false)
+}
+fn resize_bilinear(src: &Gray, ow: usize, oh: usize) -> Gray {
+    resize_filtered(src, ow, oh, true)
+}
+fn resize_filtered(src: &Gray, ow: usize, oh: usize, bilinear: bool) -> Gray {
+    let (kh, bh, kkh) = coeffs(src.w, 0.0, src.w as f64, ow, bilinear);
+    let (kv, mut bv, kkv) = coeffs(src.h, 0.0, src.h as f64, oh, bilinear);
     let y0 = bv[0].0;
     let y1 = bv[oh - 1].0 + bv[oh - 1].1;
     for b in bv.iter_mut() {
@@ -235,3 +249,9 @@ mod tests {
         assert_eq!(artwork_hash(&im, b, false, true).unwrap(), "0".repeat(48));
     }
 }
+
+pub mod catalog;
+pub mod decode;
+pub mod identify;
+pub mod language;
+pub mod layout;

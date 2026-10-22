@@ -1,72 +1,53 @@
-# Rustハッシュ互換性試作
+# Rustコア・CLI試作
 
-現行Python版を残したまま、Rust移植の最初の段階を検証するCargo workspaceです。
-`mdript-core`はPillow互換Lanczos縮小・グレースケール・DCT・ハッシュ生成と既定枠の計算、`mdript-cli`は画像読み込みとJSON出力を担当します。
+現行Python版の照合・切り抜き・保存を段階移植するCargo workspace。`mdript-core`はPillow互換ハッシュ、DB順位付け、言語判別、枠検出・探索を担当し、`mdript-cli`は画像入力、結果JSON、保存を担当します。現在は同期処理です。
 
-## ビルドと使用
+## ビルド
 
-Rust 1.99.0 / Windows MSVCで検証。リポジトリのルートから実行します。
-
-```powershell
-cargo build --release --manifest-path rust/Cargo.toml
-rust/target/release/mdript-cli.exe "C:/images/screenshot.jpg" --center
-rust/target/release/mdript-cli.exe "C:/images/card.png" --card
-rust/target/release/mdript-cli.exe "C:/images/screenshot.jpg" --box 833 69 1727 1371 --coarse
-```
-
-指定なしでは画面の高さと中央位置からカード枠を計算します。
-`--card`は画像全体をカードとして扱い、`--box L T R B`は明示した枠を使います。
-ハッシュは通常128bit、`--coarse`は上側64bit、`--center`は上下と中央の192bitです。
-`--coarse`と`--center`、`--card`と`--box`の同時指定はエラーです。
-エラーは標準エラーにJSONを出し、終了コード1を返します。
-
-## Pythonとの比較
+Windows 11 / Rust 1.99 MSVCで確認。リポジトリのルートから:
 
 ```powershell
-python rust/tools/compare_python.py C:/dev/mdript-sample-img --report rust/local-results/sample-comparison.json
+cargo build --release --manifest-path rust/Cargo.toml --locked --bin mdript-cli
 ```
 
-PillowとNumPyが必要です。全画像を3つのハッシュモードで比較します。
-`native_decode`は各言語で元ファイルをデコードした結果、`same_pixels`はPythonでRGB化してPNGにした同じ画素をRustへ渡した結果です。
-前者だけが不一致なら、まず画像デコーダーを調べます。どちらかに不一致・入力エラーがある場合は終了コード1です。
-比較用PNGは指定レポートの隣の一時ディレクトリに作り、終了時に削除します。元画像とAPPDATAは書き換えません。
-詳細レポート・ビルド生成物はGit管理外です。比較時間にはプロセス起動とPNG生成が含まれるため、速度ベンチマークには使えません。
-
-## テスト
+## 画像を処理する
 
 ```powershell
-cd rust
-cargo test --workspace
-cargo clippy --workspace --all-targets -- -D warnings
-cargo fmt --all --check
+rust/target/release/mdript-cli.exe identify C:/images --output C:/tmp/mdript-rust-output --user-data C:/tmp/mdript-rust-user --format both
 ```
 
-既定枠、不正な枠、各モード、Pythonから得た固定期待値をテストします。
+`--output`と`--user-data`には**異なる絶対ディレクトリ**を指定します。後者は省略可能なコピー済み`card_names.json`と`card_hashes_user.json`の読み取り先で、存在しなくても動きます。普段の`%APPDATA%/mdript`は読み書きせず、その場所を指定しても拒否します。ユーザーデータの取得や更新はまだ実装していません。
 
-## 今回の範囲と未実装
+既定はWebP品質90、角丸透過、再帰、重複スキップ、要確認・カードなしを保存、言語判別と日本語/英語名。`--format png|webp|both`、`--quality 1..100`、`--resolution auto|fixed|WxH`、`--english name|ja|off`、`--split none|en|both`、`--no-rounded`、`--no-recursive`、`--keep-duplicates`、`--no-review`、`--no-not-card`を使用できます。`--card`は画像全体をカードとして、`--box L T R B`は明示した枠を使います。`--dry-run`は判定だけ行い、出力ディレクトリや画像を作りません。
 
-このCLIはハッシュを調べる試作で、既存CLIの置き換えではありません。
-カードDB照合、探索・検出、言語判別、切り抜き保存、重複処理、更新、学習、Tauri/Vue GUIはまだありません。
-画像は最大幅・高さ16,384、デコード割当上限512MiB、RGB化前の画素数64百万、カード領域16百万画素で制限します。これらはプロセス全体のメモリ上限を保証するものではありません。
-200枚一致という引き継ぎ資料の結果を、今回の実測としては扱いません。DCTの浮動小数の加算順やJPEGデコードがPythonと異なるため、すべての画像でのビット一致は保証しません。
-次はデコード差を確認してから、現在のPython版を基準に照合と保存を移植します。
+標準出力は`confirmed/review/not_card/error/skipped/seconds/results`を含むJSONです。各結果にはPython版と同じ状態・ID・名前・距離・2位との差・保存先・備考・言語に加え、枠、枠の信頼区分、ハッシュ、候補、言語比を含みます。入力画像のエラーがあっても他の画像を処理し、結果一覧を返して終了コード1にします。保存は入力順、既存ファイルの排他的予約、失敗時の清掃に対応します。
 
-## 出典
+従来の読み取り専用ハッシュ調査コマンドも使えます:
 
-縮小・DCT実装の出発点は利用者提供の「mdriptのRust検討案.md」の掲載試作です。
-縮小処理はPillowのResample.c由来です。著作権・許諾表示は `third-party/Pillow-LICENSE.txt` に同梱しています。
+```powershell
+rust/target/release/mdript-cli.exe C:/images/shot.jpg --center
+rust/target/release/mdript-cli.exe C:/images/crop.png --card --coarse
+```
 
-## 2026-10-21の実測
+## 検証
 
-手元の256画像×3モード、768ケースで比較しました。
+```powershell
+cargo test --manifest-path rust/Cargo.toml --workspace --locked
+cargo clippy --manifest-path rust/Cargo.toml --workspace --all-targets --locked -- -D warnings
+cargo fmt --manifest-path rust/Cargo.toml --all --check
+```
 
-| 条件 | 一致 | 不一致 |
-|---|---:|---:|
-| PythonでRGB化した同一画素をPNG経由で渡す | 768/768 | 0 |
-| 各実装で元ファイルをデコード | 739/768 | 29ケース（13画像、最大2bit） |
+Rustの19テスト、Python版の75テストは通過。独立レビュー用の`tools/review_reference.py`、`review_compare.py`、`review_scenarios.py`、`review_safety.py`で次を確認しました。
 
-不一致の各ケースも同一画素条件では一致しています。画像デコード経路の差を解決するまでは既存DBとの完全互換を宣言しません。カードの照合結果が変わるかどうかはまだ測定していません。
-リリースexeは876,544 bytes（ハッシュCLIのみ）。完成版の容量や速度の見積もりには使えません。
-Rustテスト4件、Clippy警告ゼロ、フォーマット確認に合格しました。GitHub Actionsは追加のみで、リモート実行は未確認です。
+- 実スクリーンショット256枚: 状態・カードID・名前・言語・備考は全件一致。距離か2位との差だけ8枚で不一致（最大4）。主因はJPEGデコードの画素差。全件の厳密一致判定は248/256。
+- 4枚を720p、JPEG50、ウィンドウ模擬へ変形した12ケース: 全項目一致（11確定、1カードなし）。
+- 合成入力の5設定×12画像: 状態・ID・名前・保存名・出力画像の復号画素が全件一致。特殊な中央ハッシュ、枠色、英語版、重複、壊れた画像、角丸、both形式を含む。
+- 引数拒否と4プロセスの同時保存など8項目は通過。
 
-実画像の工程別速度と採用判断は [実測レポート](../docs/rust-prototype-decision.md) を参照。
+比較結果の詳細はGit管理外の`rust/local-results/review/`に保存。JPEGの全画素一致はまだ達成していません。今回試したlibjpeg-turbo Rust連携はこの環境にCMakeがないためビルドできず、完成コードには入れていません。既存DBとの完全互換や製品版の速度を保証しません。
+
+## 未実装
+
+`log.csv`、複数ワーカー、名前・ハッシュDBの更新、`--learn`、Tauri/Vue GUIは未実装。ユーザーデータを製品版でどう移行するかも今後決めます。現行Python版の安全性修正を含む機能を移植し、全検証画像の厳密な結果比較と通し処理の速度を測ってから置き換えを判断します。
+
+縮小・DCT実装の出発点は利用者提供の「mdriptのRust検討案.md」。Pillow Resample.c由来コードの許諾表示は`third-party/Pillow-LICENSE.txt`にあります。
