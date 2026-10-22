@@ -1,4 +1,4 @@
-use image::RgbImage;
+use image::{DynamicImage, Rgb, RgbImage};
 use std::{fs, io::BufReader, path::Path};
 
 /// Bounded decoder shared by the hash command and the identification pipeline.
@@ -20,5 +20,26 @@ pub fn load_rgb(path: &Path) -> Result<RgbImage, String> {
     if u64::from(decoded.width()) * u64::from(decoded.height()) > 64_000_000 {
         return Err("image exceeds 64 million pixels".into());
     }
-    Ok(decoded.to_rgb8())
+    // Pillow opens 16-bit grayscale PNG as I;16 and clamps on convert("RGB").
+    // It opens 16-bit LA/RGB/RGBA PNG as 8-bit RGBA/RGB, dropping the low byte.
+    let rgb = match decoded {
+        DynamicImage::ImageLuma16(im) => RgbImage::from_fn(im.width(), im.height(), |x, y| {
+            let v = im.get_pixel(x, y)[0].min(255) as u8;
+            Rgb([v, v, v])
+        }),
+        DynamicImage::ImageLumaA16(im) => RgbImage::from_fn(im.width(), im.height(), |x, y| {
+            let v = (im.get_pixel(x, y)[0] >> 8) as u8;
+            Rgb([v, v, v])
+        }),
+        DynamicImage::ImageRgb16(im) => RgbImage::from_fn(im.width(), im.height(), |x, y| {
+            let p = im.get_pixel(x, y);
+            Rgb([(p[0] >> 8) as u8, (p[1] >> 8) as u8, (p[2] >> 8) as u8])
+        }),
+        DynamicImage::ImageRgba16(im) => RgbImage::from_fn(im.width(), im.height(), |x, y| {
+            let p = im.get_pixel(x, y);
+            Rgb([(p[0] >> 8) as u8, (p[1] >> 8) as u8, (p[2] >> 8) as u8])
+        }),
+        other => other.to_rgb8(),
+    };
+    Ok(rgb)
 }
