@@ -10,6 +10,8 @@ Windows 11 / Rust 1.99 MSVCで確認。リポジトリのルートから:
 cargo build --release --manifest-path rust/Cargo.toml --locked --bin mdript-cli
 ```
 
+並列処理のpanicから復帰して予約を解放するため、dev/releaseとも`panic=unwind`が必須で、`panic=abort`ではビルドを拒否します。
+
 ## 画像を処理する
 
 ```powershell

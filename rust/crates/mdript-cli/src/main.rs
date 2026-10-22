@@ -1,3 +1,8 @@
+#[cfg(not(panic = "unwind"))]
+compile_error!(
+    "mdript-cli requires panic=unwind so per-image panic recovery can release worker reservations"
+);
+
 mod csv_log;
 mod hash_cli;
 mod process;
