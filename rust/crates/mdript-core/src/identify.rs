@@ -110,7 +110,8 @@ pub fn identify(im: &RgbImage, catalog: &Catalog, resolution: &Resolution) -> Op
             return best;
         }
     }
-    let mut center = detected.or_else(|| best.as_ref().map(|f| f.card_box))?;
+    let current_best = best.as_ref()?;
+    let mut center = detected.unwrap_or(current_best.card_box);
     let mut found = None;
     for (shifts, scales) in [
         (
@@ -169,5 +170,37 @@ mod tests {
             .is_none()
         );
         assert!(identify(&im, &Catalog::default(), &Resolution::Auto).is_none());
+    }
+    #[test]
+    fn detected_box_too_small_does_not_trigger_nudged_search() {
+        let mut im = RgbImage::new(90, 60);
+        for y in 2..58 {
+            for x in 5..43 {
+                im.put_pixel(x, y, image::Rgb([220, 220, 220]));
+            }
+        }
+        let detected = layout::detect_card_box(&im).expect("card edge should be detected");
+        assert!(detected[2] - detected[0] < 40, "{detected:?}");
+        assert!(detected[0] < 20, "{detected:?}");
+        let larger = layout::nudged(
+            detected,
+            im.dimensions(),
+            &[-0.03, -0.015, 0., 0.015, 0.03],
+            &[0.94, 0.97, 1., 1.03, 1.06],
+        )
+        .into_iter()
+        .find(|b| b[2] - b[0] >= 40 && b[3] - b[1] >= 40)
+        .expect("nudged search should have a valid box");
+        let hash = artwork_hash(&im, larger, false, false).unwrap();
+        let catalog =
+            Catalog::from_json(&format!(r#"{{"hashes":{{"1":["{hash}"]}}}}"#), None, None).unwrap();
+        assert!(
+            layout::trusted_boxes(&im, &Resolution::Auto)
+                .into_iter()
+                .all(|b| evaluate(&im, b, false, false, &catalog).is_none())
+        );
+        assert!(evaluate(&im, detected, true, false, &catalog).is_none());
+        assert!(evaluate(&im, larger, true, true, &catalog).is_some());
+        assert!(identify(&im, &catalog, &Resolution::Auto).is_none());
     }
 }

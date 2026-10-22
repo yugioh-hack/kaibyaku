@@ -37,14 +37,16 @@ cargo clippy --manifest-path rust/Cargo.toml --workspace --all-targets --locked 
 cargo fmt --manifest-path rust/Cargo.toml --all --check
 ```
 
-Rustの19テスト、Python版の75テストは通過。独立レビュー用の`tools/review_reference.py`、`review_compare.py`、`review_scenarios.py`、`review_safety.py`で次を確認しました。
+Rustの23テストと`cargo fmt --all --check`、`cargo clippy --workspace --all-targets --locked -- -D warnings`は通過。既存のPython版75テストも移植前の検証で通過しています。独立レビュー用の`tools/review_reference.py`、`review_compare.py`、`review_scenarios.py`、`review_safety.py`で次を再確認しました。
 
 - 実スクリーンショット256枚: 状態・カードID・名前・言語・備考は全件一致。距離か2位との差だけ8枚で不一致（最大4）。主因はJPEGデコードの画素差。全件の厳密一致判定は248/256。
 - 4枚を720p、JPEG50、ウィンドウ模擬へ変形した12ケース: 全項目一致（11確定、1カードなし）。
 - 合成入力の5設定×12画像: 状態・ID・名前・保存名・出力画像の復号画素が全件一致。特殊な中央ハッシュ、枠色、英語版、重複、壊れた画像、角丸、both形式を含む。
 - 引数拒否と4プロセスの同時保存など8項目は通過。
 
-比較結果の詳細はGit管理外の`rust/local-results/review/`に保存。JPEGの全画素一致はまだ達成していません。今回試したlibjpeg-turbo Rust連携はこの環境にCMakeがないためビルドできず、完成コードには入れていません。既存DBとの完全互換や製品版の速度を保証しません。
+今回の比較結果の詳細はGit管理外の`rust/local-results/current/`に保存。実画像の比較スクリプトは、既知のJPEG差8件があるため終了コード1を返します。Rust CLI自体は終了コード0で256件を処理しました。JPEGの全画素一致はまだ達成していません。試したlibjpeg-turbo Rust連携はこの環境にCMakeがないためビルドできず、完成コードには入れていません。
+
+16bit PNGはPillow 12.2.0の読み込み・`convert("RGB")`結果に合わせています。グレースケール（PNG color type 0、Pillow `I;16`）は各値を255で切り捨て、LA・RGB・RGBA（color type 4・2・6、Pillowが8bit `RGBA`/`RGB`として開く）は下位8bitを落とし、アルファを無視します。各形式について0〜255の値と0〜65535の値で固定PNGを作り、Pythonの`artwork_phash_hex(Image.open(p).convert("RGB"))`と同じハッシュになることを確認しました。これら以外の16bit PNG形式・メタデータの組み合わせは未確認です。既存DBとの完全互換や製品版の速度は保証しません。
 
 ## 未実装
 
