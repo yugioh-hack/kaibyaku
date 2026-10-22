@@ -1,3 +1,4 @@
+use crate::paths::{is_within, resolved};
 use image::{ImageEncoder, RgbImage, RgbaImage};
 use mdript_core::{
     catalog::Catalog,
@@ -187,7 +188,7 @@ fn parse(args: Vec<OsString>) -> Result<(Options, Vec<PathBuf>), String> {
     }
     if let Some(appdata) = std::env::var_os("APPDATA") {
         let live = resolved(&PathBuf::from(appdata).join("mdript"))?;
-        if o.output.starts_with(&live) || o.user_data.starts_with(&live) {
+        if is_within(&o.output, &live) || is_within(&o.user_data, &live) {
             return Err("prototype paths must be isolated from live APPDATA/mdript".into());
         }
     }
@@ -195,31 +196,6 @@ fn parse(args: Vec<OsString>) -> Result<(Options, Vec<PathBuf>), String> {
         return Err("identify requires at least one input".into());
     }
     Ok((o, paths))
-}
-// Resolve existing ancestors, preventing symlink/junction aliases from defeating isolation.
-fn resolved(path: &Path) -> Result<PathBuf, String> {
-    let absolute = std::path::absolute(path).map_err(|e| e.to_string())?;
-    let mut clean = PathBuf::new();
-    for c in absolute.components() {
-        match c {
-            std::path::Component::ParentDir => {
-                clean.pop();
-            }
-            std::path::Component::CurDir => {}
-            _ => clean.push(c.as_os_str()),
-        }
-    }
-    let mut cursor = clean.as_path();
-    let mut tail = vec![];
-    while !cursor.exists() {
-        tail.push(cursor.file_name().ok_or("invalid path")?.to_owned());
-        cursor = cursor.parent().ok_or("invalid path")?;
-    }
-    let mut out = fs::canonicalize(cursor).map_err(|e| e.to_string())?;
-    for part in tail.into_iter().rev() {
-        out.push(part);
-    }
-    Ok(out)
 }
 fn display_path(path: &Path) -> String {
     let text = path.to_string_lossy();

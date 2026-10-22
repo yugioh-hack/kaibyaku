@@ -6,6 +6,7 @@ compile_error!(
 mod csv_log;
 mod hash_cli;
 mod learn;
+mod paths;
 mod process;
 mod updater;
 mod updater_hash;

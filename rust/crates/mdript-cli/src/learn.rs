@@ -196,15 +196,7 @@ pub fn run(args: Vec<OsString>) -> Result<(), String> {
     let cid = args[0].to_str().ok_or("CID must be Unicode")?;
     let image = PathBuf::from(&args[1]);
     let user_dir = PathBuf::from(&args[3]);
-    if !user_dir.is_absolute() {
-        return Err("--user-data must be an absolute directory".into());
-    }
-    if let Some(appdata) = std::env::var_os("APPDATA") {
-        let live = PathBuf::from(appdata).join("mdript");
-        if user_dir == live || user_dir.starts_with(&live) {
-            return Err("live APPDATA/mdript is not allowed".into());
-        }
-    }
+    let user_dir = crate::paths::validate_user_data(&user_dir)?;
     println!("{}", learn(cid, &image, &user_dir)?);
     Ok(())
 }

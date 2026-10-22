@@ -330,15 +330,7 @@ pub fn run(args: Vec<OsString>) -> Result<(), String> {
         i += 1;
     }
     let user_dir = user_dir.ok_or("--user-data ABS_DIR is required")?;
-    if !user_dir.is_absolute() {
-        return Err("--user-data must be absolute".into());
-    }
-    if let Some(appdata) = std::env::var_os("APPDATA") {
-        let live = PathBuf::from(appdata).join("mdript");
-        if user_dir == live || user_dir.starts_with(&live) {
-            return Err("live APPDATA/mdript is not allowed".into());
-        }
-    }
+    let user_dir = crate::paths::validate_user_data(&user_dir)?;
     let names = read_object(&user_dir.join("card_names.json"))
         .ok_or("card_names.json is required; run update-names first")?;
     let cards = names["cards"]

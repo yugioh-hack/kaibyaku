@@ -282,15 +282,7 @@ pub fn run_names(args: Vec<OsString>) -> Result<(), String> {
         return Err("usage: mdript-cli update-names --user-data ABS_DIR".into());
     }
     let user_dir = PathBuf::from(&args[1]);
-    if !user_dir.is_absolute() {
-        return Err("--user-data must be absolute".into());
-    }
-    if let Some(appdata) = std::env::var_os("APPDATA") {
-        let live = PathBuf::from(appdata).join("mdript");
-        if user_dir == live || user_dir.starts_with(&live) {
-            return Err("live APPDATA/mdript is not allowed".into());
-        }
-    }
+    let user_dir = crate::paths::validate_user_data(&user_dir)?;
     install_cancel_handler()?;
     let cards = fetch_card_names(&mut HttpClient::new())?;
     check_cancelled()?;
