@@ -65,6 +65,14 @@ pub(crate) fn loaded_hashes(
     Ok((hashes, packs))
 }
 
+/// 照合用ハッシュを持っているカードID（learn で登録できるカード）。
+pub fn known_card_ids(user_dir: &Path) -> std::collections::HashSet<String> {
+    let user = read_object(&user_dir.join("card_hashes_user.json"));
+    loaded_hashes(user.as_ref())
+        .map(|(map, _)| map.keys().cloned().collect())
+        .unwrap_or_default()
+}
+
 /// 照合データの件数（カード種類数・ハッシュ数・カード名の件数と取得日時）。画面の表示用。
 pub fn data_summary(user_dir: &Path) -> Value {
     let user = read_object(&user_dir.join("card_hashes_user.json"));

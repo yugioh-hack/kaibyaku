@@ -14,7 +14,7 @@ use std::{
     },
     thread,
 };
-use tauri::{AppHandle, Emitter, State};
+use tauri::{AppHandle, Emitter, Manager, State};
 
 const USER_DIR_NAME: &str = "mdript-prototype";
 const CANCELLED: &str = "更新を中断しました";
@@ -184,6 +184,10 @@ fn start_identify(
 ) -> Result<(), String> {
     let o = options(&args, user_dir()?)?;
     start(&busy)?;
+    // 結果一覧のサムネイル用に、出力先の画像だけを画面から読めるようにする
+    let _ = app
+        .asset_protocol_scope()
+        .allow_directory(PathBuf::from(args.output.trim()), true);
     let busy = Arc::clone(&busy);
     thread::spawn(move || {
         let _guard = RunningGuard(&busy.running);
@@ -207,6 +211,128 @@ fn start_identify(
         };
         let _ = app.emit("identify-done", payload);
     });
+    Ok(())
+}
+
+/// 画像1枚だけを判定し直す（登録の後に使う）。画面の一覧はこの結果で置き換える。
+#[tauri::command(async)]
+fn identify_one(
+    busy: State<'_, Arc<Busy>>,
+    path: String,
+    args: IdentifyArgs,
+) -> Result<Value, String> {
+    let mut o = options(&args, user_dir()?)?;
+    o.workers = 1;
+    start(&busy)?;
+    let _guard = RunningGuard(&busy.running);
+    let summary = process::identify_paths(
+        &o,
+        vec![PathBuf::from(path)],
+        &AtomicBool::new(false),
+        &|_, _, _| {},
+    )?;
+    summary["results"]
+        .get(0)
+        .cloned()
+        .ok_or_else(|| "画像が見つかりませんでした".into())
+}
+
+fn catalog(dir: &Path) -> Result<mdript_core::catalog::Catalog, String> {
+    let user = fs::read_to_string(dir.join("card_hashes_user.json")).ok();
+    let names = fs::read_to_string(dir.join("card_names.json")).ok();
+    mdript_core::catalog::Catalog::bundled(user.as_deref(), names.as_deref())
+}
+
+/// カードIDの表示名（候補の一覧用）。
+#[tauri::command(async)]
+fn describe_cards(cids: Vec<String>) -> Result<Vec<Value>, String> {
+    let catalog = catalog(&user_dir()?)?;
+    Ok(cids
+        .iter()
+        .map(|cid| json!({"cid": cid, "name": catalog.display_name(cid, false)}))
+        .collect())
+}
+
+/// カード名（日本語名・英語名・ルビ）で検索する。照合用ハッシュを持つカードだけを最大30件返す。
+#[tauri::command(async)]
+fn search_cards(query: String) -> Result<Vec<Value>, String> {
+    let query = query.trim().to_lowercase();
+    if query.is_empty() {
+        return Ok(vec![]);
+    }
+    let dir = user_dir()?;
+    let known = learn::known_card_ids(&dir);
+    let catalog = catalog(&dir)?;
+    let mut hits: Vec<_> = catalog
+        .names
+        .iter()
+        .filter(|(cid, _)| known.contains(*cid))
+        .filter(|(cid, fields)| {
+            cid.as_str() == query
+                || ["n", "e", "r"].iter().any(|key| {
+                    fields
+                        .get(*key)
+                        .is_some_and(|value| value.to_lowercase().contains(&query))
+                })
+        })
+        .map(|(cid, _)| (cid.clone(), catalog.display_name(cid, false)))
+        .collect();
+    hits.sort_by(|a, b| a.1.len().cmp(&b.1.len()).then_with(|| a.1.cmp(&b.1)));
+    Ok(hits
+        .into_iter()
+        .take(30)
+        .map(|(cid, name)| json!({"cid": cid, "name": name}))
+        .collect())
+}
+
+/// 画像1枚のハッシュを、選んだカードの照合用として追加する（Python 版の --learn と同じ判定）。
+/// reprocess が true なら、判定し直せば確定する見込みがある。
+#[tauri::command(async)]
+fn learn_card(busy: State<'_, Arc<Busy>>, cid: String, source: String) -> Result<Value, String> {
+    if busy.running.load(Ordering::SeqCst) {
+        return Err("いま処理中です。終わるまでお待ちください。".into());
+    }
+    let result = learn::learn_image(&cid, Path::new(&source), &user_dir()?)?;
+    let message = result["message"].as_str().unwrap_or_default().to_owned();
+    let reprocess = message == "照合用ハッシュを追加しました"
+        || message == "すでに確定できるので、追加しません";
+    Ok(json!({"message": message, "reprocess": reprocess}))
+}
+
+/// この実行で review/ か not_card/ に保存した画像を消す（登録して確定した後の古いコピー）。
+/// 出力先の中の review・not_card フォルダにある webp/png だけを対象にし、同じ名前の両形式を消す。
+#[tauri::command(async)]
+fn remove_review_copy(path: String, output: String) -> Result<(), String> {
+    let file = PathBuf::from(&path);
+    let output = PathBuf::from(output.trim());
+    if !file.is_absolute() || !output.is_absolute() {
+        return Err("削除できない場所です".into());
+    }
+    let file = fs::canonicalize(&file).map_err(|e| e.to_string())?;
+    let output = fs::canonicalize(&output).map_err(|e| e.to_string())?;
+    let parent = file.parent().ok_or("削除できない場所です")?;
+    let in_review = parent
+        .strip_prefix(&output)
+        .ok()
+        .and_then(|relative| relative.components().next())
+        .is_some_and(|first| {
+            let first = first.as_os_str();
+            first == "review" || first == "not_card"
+        });
+    let stem = file.file_stem().ok_or("削除できない場所です")?;
+    let extension = file
+        .extension()
+        .and_then(|e| e.to_str())
+        .map(str::to_ascii_lowercase);
+    if !in_review || !matches!(extension.as_deref(), Some("webp" | "png")) {
+        return Err("削除できない場所です".into());
+    }
+    for ext in ["webp", "png"] {
+        let sibling = parent.join(stem).with_extension(ext);
+        if sibling.is_file() {
+            fs::remove_file(&sibling).map_err(|e| e.to_string())?;
+        }
+    }
     Ok(())
 }
 
@@ -330,7 +456,12 @@ pub fn run() {
             start_update,
             stop,
             data_summary,
-            open_folder
+            open_folder,
+            identify_one,
+            describe_cards,
+            search_cards,
+            learn_card,
+            remove_review_copy
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
@@ -386,6 +517,43 @@ mod tests {
         assert!(options(&args("relative", "auto", "webp"), root.join("user")).is_err());
         assert!(options(&args(&out, "auto", "gif"), root.join("user")).is_err());
         assert!(options(&args(&out, "axb", "webp"), root.join("user")).is_err());
+    }
+
+    #[test]
+    fn remove_review_copy_only_touches_review_and_not_card() {
+        let root = std::env::temp_dir().join(format!("mdript-gui-remove-{}", std::process::id()));
+        let review = root.join("review");
+        let not_card = root.join("not_card");
+        let en = root.join("en");
+        for dir in [&review, &not_card, &en] {
+            fs::create_dir_all(dir).unwrap();
+        }
+        let out = root.to_string_lossy().into_owned();
+        for path in [
+            review.join("a.webp"),
+            review.join("a.png"),
+            review.join("keep.webp"),
+            not_card.join("b.webp"),
+            en.join("c.webp"),
+            root.join("d.webp"),
+            review.join("e.txt"),
+        ] {
+            fs::write(path, b"x").unwrap();
+        }
+        let remove =
+            |path: PathBuf| remove_review_copy(path.to_string_lossy().into_owned(), out.clone());
+        remove(review.join("a.webp")).unwrap();
+        assert!(!review.join("a.webp").exists() && !review.join("a.png").exists());
+        assert!(review.join("keep.webp").exists());
+        remove(not_card.join("b.webp")).unwrap();
+        assert!(!not_card.join("b.webp").exists());
+        assert!(remove(en.join("c.webp")).is_err());
+        assert!(remove(root.join("d.webp")).is_err());
+        assert!(remove(review.join("e.txt")).is_err());
+        assert!(remove(review.join("..").join("d.webp")).is_err());
+        assert!(en.join("c.webp").exists() && root.join("d.webp").exists());
+        assert!(remove_review_copy("relative.webp".into(), out.clone()).is_err());
+        fs::remove_dir_all(root).unwrap();
     }
 
     #[test]
