@@ -1,6 +1,9 @@
 //! 画面（Vue）から呼ぶコマンド。処理そのものは mdript-cli のライブラリをそのまま使う。
 //!
-//! 試作版のユーザーデータは %APPDATA%\mdript-prototype に置き、現行版の %APPDATA%\mdript には触れない。
+//! ユーザーデータは %APPDATA%\mdript-v2 に置く。旧アプリの %APPDATA%\mdript は、初回起動時に
+//! 読み取ってコピーするだけで、変更しない（migrate.rs）。
+mod migrate;
+
 use mdript_cli::{learn, process, updater, updater_hash};
 use serde::Deserialize;
 use serde_json::{Map, Value, json};
@@ -9,27 +12,73 @@ use std::{
     panic::{AssertUnwindSafe, catch_unwind},
     path::{Path, PathBuf},
     sync::{
-        Arc,
+        Arc, Condvar, Mutex, MutexGuard,
         atomic::{AtomicBool, Ordering},
     },
     thread,
 };
 use tauri::{AppHandle, Emitter, Manager, State};
 
-const USER_DIR_NAME: &str = "mdript-prototype";
+const USER_DIR_NAME: &str = "mdript-v2";
+const LEGACY_DIR_NAME: &str = "mdript";
 const CANCELLED: &str = "更新を中断しました";
 
 #[derive(Default)]
+struct BusyState {
+    running: bool,
+    closing: bool,
+}
+
+/// 処理中かどうかと、中止の合図。終了するときは処理が終わるまで待てる。
+#[derive(Default)]
 struct Busy {
-    running: AtomicBool,
+    state: Mutex<BusyState>,
+    idle: Condvar,
     cancel: Arc<AtomicBool>,
 }
 
-/// 処理中の印。処理が終わる（panic を含む）と必ず外れる。
-struct RunningGuard<'a>(&'a AtomicBool);
-impl Drop for RunningGuard<'_> {
+/// 処理中の印。処理が終わる（panic を含む）と必ず外れ、終了待ちを起こす。
+struct RunningGuard(Arc<Busy>);
+impl Drop for RunningGuard {
     fn drop(&mut self) {
-        self.0.store(false, Ordering::SeqCst);
+        self.0.lock().running = false;
+        self.0.idle.notify_all();
+    }
+}
+
+impl Busy {
+    fn lock(&self) -> MutexGuard<'_, BusyState> {
+        self.state.lock().unwrap_or_else(|e| e.into_inner())
+    }
+
+    /// 処理を始める印を付ける。処理中・終了中なら始めない。
+    fn begin(busy: &Arc<Busy>) -> Result<RunningGuard, String> {
+        let mut state = busy.lock();
+        if state.closing {
+            return Err("終了しています。".into());
+        }
+        if state.running {
+            return Err("いま処理中です。終わるまでお待ちください。".into());
+        }
+        state.running = true;
+        busy.cancel.store(false, Ordering::SeqCst);
+        updater::reset_cancel();
+        Ok(RunningGuard(Arc::clone(busy)))
+    }
+
+    fn request_stop(&self) {
+        self.cancel.store(true, Ordering::SeqCst);
+        updater::request_cancel();
+    }
+
+    /// 以降の処理開始を止め、いまの処理に中止を伝えて、終わる（保存・記録を済ませる）まで待つ。
+    fn shutdown(&self) {
+        let mut state = self.lock();
+        state.closing = true;
+        self.request_stop();
+        while state.running {
+            state = self.idle.wait(state).unwrap_or_else(|e| e.into_inner());
+        }
     }
 }
 
@@ -101,7 +150,22 @@ fn write_config(dir: &Path, config: &Map<String, Value>) -> Result<(), String> {
 #[tauri::command]
 fn get_state() -> Result<Value, String> {
     let dir = user_dir()?;
+    // 旧アプリのデータの取り込みは一度だけ。失敗しても起動は止めない
+    let legacy = std::env::var_os("APPDATA").map(|base| PathBuf::from(base).join(LEGACY_DIR_NAME));
+    let migration = match legacy {
+        Some(legacy) => migrate::migrate(&legacy, &dir, |v| Value::Object(filter_config(v)))
+            .map(|report| {
+                if report.is_empty() {
+                    Value::Null
+                } else {
+                    report.to_json()
+                }
+            })
+            .unwrap_or_else(|error| json!({"error": error})),
+        None => Value::Null,
+    };
     Ok(json!({
+        "migration": migration,
         "version": env!("CARGO_PKG_VERSION"),
         "user_data": dir.to_string_lossy(),
         "default_output": default_output(),
@@ -167,15 +231,6 @@ fn options(args: &IdentifyArgs, user_data: PathBuf) -> Result<process::Options, 
     Ok(o)
 }
 
-fn start(busy: &Busy) -> Result<(), String> {
-    if busy.running.swap(true, Ordering::SeqCst) {
-        return Err("いま処理中です。終わるまでお待ちください。".into());
-    }
-    busy.cancel.store(false, Ordering::SeqCst);
-    updater::reset_cancel();
-    Ok(())
-}
-
 #[tauri::command]
 fn start_identify(
     app: AppHandle,
@@ -184,7 +239,7 @@ fn start_identify(
     args: IdentifyArgs,
 ) -> Result<(), String> {
     let o = options(&args, user_dir()?)?;
-    start(&busy)?;
+    let guard = Busy::begin(&busy)?;
     // サムネイルと確認パネル用に、出力先と、今回入力した画像だけを画面から読めるようにする
     let scope = app.asset_protocol_scope();
     let _ = scope.allow_directory(PathBuf::from(args.output.trim()), true);
@@ -197,7 +252,8 @@ fn start_identify(
     }
     let busy = Arc::clone(&busy);
     thread::spawn(move || {
-        let _guard = RunningGuard(&busy.running);
+        // イベントを送った後に外れる（終了待ちは、結果の通知まで済んでから解ける）
+        let _guard = guard;
         let inputs = paths.into_iter().map(PathBuf::from).collect();
         let on_result = |done: usize, total: usize, result: &Value| {
             let _ = app.emit(
@@ -230,18 +286,17 @@ fn identify_one(
 ) -> Result<Value, String> {
     let mut o = options(&args, user_dir()?)?;
     o.workers = 1;
-    start(&busy)?;
-    let _guard = RunningGuard(&busy.running);
-    let summary = process::identify_paths(
-        &o,
-        vec![PathBuf::from(path)],
-        &AtomicBool::new(false),
-        &|_, _, _| {},
-    )?;
-    summary["results"]
-        .get(0)
-        .cloned()
-        .ok_or_else(|| "画像が見つかりませんでした".into())
+    let _guard = Busy::begin(&busy)?;
+    let summary =
+        process::identify_paths(&o, vec![PathBuf::from(path)], &busy.cancel, &|_, _, _| {})?;
+    let Some(result) = summary["results"].get(0).cloned() else {
+        return Err(if summary["cancelled"] == true {
+            "中止しました".into()
+        } else {
+            "画像が見つかりませんでした".into()
+        });
+    };
+    Ok(json!({"result": result, "csv_error": summary["csv_error"]}))
 }
 
 fn catalog(dir: &Path) -> Result<mdript_core::catalog::Catalog, String> {
@@ -296,9 +351,8 @@ fn search_cards(query: String) -> Result<Vec<Value>, String> {
 /// reprocess が true なら、判定し直せば確定する見込みがある。
 #[tauri::command(async)]
 fn learn_card(busy: State<'_, Arc<Busy>>, cid: String, source: String) -> Result<Value, String> {
-    if busy.running.load(Ordering::SeqCst) {
-        return Err("いま処理中です。終わるまでお待ちください。".into());
-    }
+    // 照合データの書き込み中に終了しないよう、処理中として扱う
+    let _guard = Busy::begin(&busy)?;
     let result = learn::learn_image(&cid, Path::new(&source), &user_dir()?)?;
     let message = result["message"].as_str().unwrap_or_default().to_owned();
     let reprocess = message == "照合用ハッシュを追加しました"
@@ -306,42 +360,45 @@ fn learn_card(busy: State<'_, Arc<Busy>>, cid: String, source: String) -> Result
     Ok(json!({"message": message, "reprocess": reprocess}))
 }
 
-/// この実行で review/ か not_card/ に保存した画像を消す（登録して確定した後の古いコピー）。
-/// 出力先の中の review・not_card フォルダにある webp/png だけを対象にし、同じ名前の両形式を消す。
+/// 登録して確定した後に、その結果が review/ か not_card/ に作った古いコピーを消す。
+/// 渡されたファイルだけが対象（同じ名前の別形式は、別の入力から作られたものかもしれないので触れない）。
+/// 出力先の中の review・not_card フォルダにある webp/png だけを受け付け、1つでも違えば何も消さない。
 #[tauri::command(async)]
-fn remove_review_copy(path: String, output: String) -> Result<(), String> {
-    let file = PathBuf::from(&path);
+fn remove_review_copy(paths: Vec<String>, output: String) -> Result<(), String> {
     let output = PathBuf::from(output.trim());
-    if !file.is_absolute() || !output.is_absolute() {
+    if !output.is_absolute() {
         return Err("削除できない場所です".into());
     }
-    let file = fs::canonicalize(&file).map_err(|e| e.to_string())?;
     let output = fs::canonicalize(&output).map_err(|e| e.to_string())?;
-    let parent = file.parent().ok_or("削除できない場所です")?;
-    let in_review = parent
-        .strip_prefix(&output)
-        .ok()
-        .and_then(|relative| relative.components().next())
-        .is_some_and(|first| {
-            let first = first.as_os_str();
-            first == "review" || first == "not_card"
-        });
-    let stem = file.file_stem().ok_or("削除できない場所です")?;
-    let extension = file
-        .extension()
-        .and_then(|e| e.to_str())
-        .map(str::to_ascii_lowercase);
-    if !in_review || !matches!(extension.as_deref(), Some("webp" | "png")) {
-        return Err("削除できない場所です".into());
-    }
-    for ext in ["webp", "png"] {
-        // with_extension だと "Mr. X" の ". X" を拡張子とみなして別のファイルを消すので、名前に足す
-        let mut name = stem.to_os_string();
-        name.push(format!(".{ext}"));
-        let sibling = parent.join(name);
-        if sibling.is_file() {
-            fs::remove_file(&sibling).map_err(|e| e.to_string())?;
+    let mut targets = Vec::new();
+    for path in paths {
+        let file = PathBuf::from(&path);
+        if !file.is_absolute() {
+            return Err("削除できない場所です".into());
         }
+        // 既に無いものは掃除済みとして扱う
+        let Ok(file) = fs::canonicalize(&file) else {
+            continue;
+        };
+        let in_review = file
+            .parent()
+            .and_then(|parent| parent.strip_prefix(&output).ok())
+            .and_then(|relative| relative.components().next())
+            .is_some_and(|first| {
+                let first = first.as_os_str();
+                first == "review" || first == "not_card"
+            });
+        let extension = file
+            .extension()
+            .and_then(|e| e.to_str())
+            .map(str::to_ascii_lowercase);
+        if !in_review || !matches!(extension.as_deref(), Some("webp" | "png")) || !file.is_file() {
+            return Err("削除できない場所です".into());
+        }
+        targets.push(file);
+    }
+    for file in targets {
+        fs::remove_file(&file).map_err(|e| e.to_string())?;
     }
     Ok(())
 }
@@ -401,10 +458,9 @@ fn update_message(result: &Value) -> Vec<String> {
 #[tauri::command]
 fn start_update(app: AppHandle, busy: State<'_, Arc<Busy>>, hashes: bool) -> Result<(), String> {
     let dir = user_dir()?;
-    start(&busy)?;
-    let busy = Arc::clone(&busy);
+    let guard = Busy::begin(&busy)?;
     thread::spawn(move || {
-        let _guard = RunningGuard(&busy.running);
+        let _guard = guard;
         let progress_app = app.clone();
         updater::set_progress(Some(Box::new(move |message: &str| {
             let _ = progress_app.emit("update-progress", message);
@@ -432,8 +488,13 @@ fn start_update(app: AppHandle, busy: State<'_, Arc<Busy>>, hashes: bool) -> Res
 
 #[tauri::command]
 fn stop(busy: State<'_, Arc<Busy>>) {
-    busy.cancel.store(true, Ordering::SeqCst);
-    updater::request_cancel();
+    busy.request_stop();
+}
+
+/// ウィンドウを閉じる前に呼ぶ。処理が止まり、保存と記録が済むまで戻らない。
+#[tauri::command(async)]
+fn shutdown(busy: State<'_, Arc<Busy>>) {
+    busy.shutdown();
 }
 
 #[tauri::command]
@@ -471,7 +532,8 @@ pub fn run() {
             describe_cards,
             search_cards,
             learn_card,
-            remove_review_copy
+            remove_review_copy,
+            shutdown
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
@@ -529,6 +591,16 @@ mod tests {
         assert!(options(&args(&out, "axb", "webp"), root.join("user")).is_err());
     }
 
+    fn remove(paths: &[PathBuf], out: &str) -> Result<(), String> {
+        remove_review_copy(
+            paths
+                .iter()
+                .map(|p| p.to_string_lossy().into_owned())
+                .collect(),
+            out.to_owned(),
+        )
+    }
+
     #[test]
     fn remove_review_copy_only_touches_review_and_not_card() {
         let root = std::env::temp_dir().join(format!("mdript-gui-remove-{}", std::process::id()));
@@ -541,35 +613,114 @@ mod tests {
         let out = root.to_string_lossy().into_owned();
         for path in [
             review.join("a.webp"),
-            review.join("a.png"),
             review.join("keep.webp"),
             not_card.join("b.webp"),
             en.join("c.webp"),
             root.join("d.webp"),
             review.join("e.txt"),
             review.join("Mr. X.webp"),
-            review.join("Mr. X.png"),
             review.join("Mr.webp"),
         ] {
             fs::write(path, b"x").unwrap();
         }
-        let remove =
-            |path: PathBuf| remove_review_copy(path.to_string_lossy().into_owned(), out.clone());
-        remove(review.join("a.webp")).unwrap();
-        assert!(!review.join("a.webp").exists() && !review.join("a.png").exists());
-        assert!(review.join("keep.webp").exists());
-        remove(review.join("Mr. X.webp")).unwrap();
-        assert!(!review.join("Mr. X.webp").exists() && !review.join("Mr. X.png").exists());
+        remove(&[review.join("a.webp")], &out).unwrap();
+        assert!(!review.join("a.webp").exists() && review.join("keep.webp").exists());
+        remove(&[review.join("Mr. X.webp")], &out).unwrap();
         assert!(review.join("Mr.webp").exists());
-        remove(not_card.join("b.webp")).unwrap();
+        remove(&[not_card.join("b.webp")], &out).unwrap();
         assert!(!not_card.join("b.webp").exists());
-        assert!(remove(en.join("c.webp")).is_err());
-        assert!(remove(root.join("d.webp")).is_err());
-        assert!(remove(review.join("e.txt")).is_err());
-        assert!(remove(review.join("..").join("d.webp")).is_err());
+        assert!(remove(&[en.join("c.webp")], &out).is_err());
+        assert!(remove(&[root.join("d.webp")], &out).is_err());
+        assert!(remove(&[review.join("e.txt")], &out).is_err());
+        assert!(remove(&[review.join("..").join("d.webp")], &out).is_err());
         assert!(en.join("c.webp").exists() && root.join("d.webp").exists());
-        assert!(remove_review_copy("relative.webp".into(), out.clone()).is_err());
+        assert!(remove(&[PathBuf::from("relative.webp")], &out).is_err());
+        // 1つでも対象外なら、ほかも消さない
+        assert!(remove(&[review.join("keep.webp"), root.join("d.webp")], &out).is_err());
+        assert!(review.join("keep.webp").exists());
         fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn remove_review_copy_keeps_same_name_files_from_other_inputs() {
+        let root = std::env::temp_dir().join(format!("mdript-gui-same-{}", std::process::id()));
+        let not_card = root.join("not_card");
+        let review = root.join("review");
+        fs::create_dir_all(&not_card).unwrap();
+        fs::create_dir_all(&review).unwrap();
+        let out = root.to_string_lossy().into_owned();
+        // 入力 A は webp、別フォルダの同名入力 B は png で保存した
+        for path in [
+            not_card.join("shot.webp"),
+            not_card.join("shot.png"),
+            not_card.join("shot_alt1.webp"),
+            review.join("pair.webp"),
+            review.join("pair.png"),
+            review.join("pair_alt1.webp"),
+            review.join("pair_alt1.png"),
+        ] {
+            fs::write(path, b"x").unwrap();
+        }
+        remove(&[not_card.join("shot.png")], &out).unwrap();
+        assert!(not_card.join("shot.webp").exists());
+        assert!(!not_card.join("shot.png").exists());
+        assert!(not_card.join("shot_alt1.webp").exists());
+        // both 形式で作った2つだけを消し、別の実行の同名ファイルは残す
+        remove(
+            &[review.join("pair_alt1.webp"), review.join("pair_alt1.png")],
+            &out,
+        )
+        .unwrap();
+        assert!(!review.join("pair_alt1.webp").exists() && !review.join("pair_alt1.png").exists());
+        assert!(review.join("pair.webp").exists() && review.join("pair.png").exists());
+        // 既に無いファイルは問題にしない
+        remove(&[not_card.join("shot.png")], &out).unwrap();
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn shutdown_waits_for_running_work_and_refuses_new_work() {
+        let busy = Arc::new(Busy::default());
+        let guard = Busy::begin(&busy).unwrap();
+        assert!(Busy::begin(&busy).is_err());
+        let finished = Arc::new(AtomicBool::new(false));
+        let worker = {
+            let (busy, finished) = (Arc::clone(&busy), Arc::clone(&finished));
+            thread::spawn(move || {
+                let _guard = guard;
+                while !busy.cancel.load(Ordering::SeqCst) {
+                    thread::sleep(std::time::Duration::from_millis(5));
+                }
+                // 中止を受けた後の書き込みに時間がかかる
+                thread::sleep(std::time::Duration::from_millis(150));
+                finished.store(true, Ordering::SeqCst);
+            })
+        };
+        busy.shutdown();
+        assert!(
+            finished.load(Ordering::SeqCst),
+            "shutdown returned before the work ended"
+        );
+        worker.join().unwrap();
+        assert!(Busy::begin(&busy).is_err());
+    }
+
+    #[test]
+    fn shutdown_is_released_when_the_work_panics() {
+        let busy = Arc::new(Busy::default());
+        let guard = Busy::begin(&busy).unwrap();
+        let worker = thread::spawn(move || {
+            let _guard = guard;
+            thread::sleep(std::time::Duration::from_millis(50));
+            panic!("injected panic");
+        });
+        busy.shutdown();
+        assert!(worker.join().is_err());
+    }
+
+    #[test]
+    fn shutdown_without_work_returns_at_once() {
+        Busy::default().shutdown();
     }
 
     #[test]

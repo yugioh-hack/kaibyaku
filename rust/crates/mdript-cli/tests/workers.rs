@@ -50,6 +50,14 @@ fn run(
             let relative = Path::new(path).strip_prefix(output).unwrap();
             row[key] = Value::String(relative.to_string_lossy().into_owned());
         }
+        if let Some(paths) = row["saved_paths"].as_array_mut() {
+            for path in paths {
+                let relative = Path::new(path.as_str().unwrap())
+                    .strip_prefix(output)
+                    .unwrap();
+                *path = Value::String(relative.to_string_lossy().into_owned());
+            }
+        }
     }
     let mut images = BTreeMap::new();
     files(output, output, &mut images);

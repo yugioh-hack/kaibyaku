@@ -1,7 +1,24 @@
-# Tauri + Vue + TypeScript
+# Rust／Tauri GUI
 
-This template should help get you started developing with Vue 3 and TypeScript in Vite. The template uses Vue 3 `<script setup>` SFCs, check out the [script setup docs](https://v3.vuejs.org/api/sfc-script-setup.html#sfc-script-setup) to learn more.
+Vue 3／TypeScript と Tauri 2 によるWindows用の画面です。使い方・保存先・制限は [ルートのREADME](../README.md)、公開前の評価は [リリース品質確認](../docs/release-readiness-2026-10-23.md) を参照してください。
 
-## Recommended IDE Setup
+`gui/` で実行します。
 
-- [VS Code](https://code.visualstudio.com/) + [Vue - Official](https://marketplace.visualstudio.com/items?itemName=Vue.volar) + [Tauri](https://marketplace.visualstudio.com/items?itemName=tauri-apps.tauri-vscode) + [rust-analyzer](https://marketplace.visualstudio.com/items?itemName=rust-lang.rust-analyzer)
+```powershell
+npm ci
+npm run tauri -- dev
+```
+
+```powershell
+npm run build
+cargo test --manifest-path src-tauri/Cargo.toml --locked
+cargo clippy --manifest-path src-tauri/Cargo.toml --all-targets --locked -- -D warnings
+cargo fmt --manifest-path src-tauri/Cargo.toml --all --check
+npm run tauri -- build --no-bundle
+```
+
+exeは `src-tauri/target/release/mdript.exe` に生成します。現設定はインストーラを作りません。WindowsではWebView2が必要です。配布用のzipとSHA-256は、リポジトリのルートで `python tools/package_release.py` を実行して `dist/` に作ります。
+
+`npm run dev` だけでブラウザに表示した場合はモックを使います。ドラッグ＆ドロップ・実画像処理・保存・公式DB取得の検証にはTauriで起動してください。
+
+ユーザーデータは `%APPDATA%\mdript-v2` に保存します。初回起動時に、旧Python版の `%APPDATA%\mdript` から設定・カード名・登録データをコピーします（`src-tauri/src/migrate.rs`）。旧版のフォルダは変更しません。

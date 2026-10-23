@@ -50,6 +50,7 @@ function makeResult(i: number): IdentifyResult {
   const kind = i % 7 === 3 ? "要確認" : i % 11 === 5 ? "カードなし" : i % 17 === 9 ? "エラー" : "確定";
   const english = i % 5 === 4;
   const none = kind === "カードなし" || kind === "エラー";
+  const saved = `C:\\mock\\out\\${kind === "確定" ? "" : kind === "要確認" ? "review\\" : "not_card\\"}card_${i}.webp`;
   return {
     source: `C:\\mock\\shots\\スクリーンショット ${String(i + 1).padStart(3, "0")}.png`,
     status: kind,
@@ -57,7 +58,8 @@ function makeResult(i: number): IdentifyResult {
     name: none ? null : english ? "Blue-Eyes White Dragon" : SAMPLE_NAMES[i % 5],
     distance: none ? 999 : kind === "要確認" ? 14 : i % 6,
     margin: 5,
-    saved_path: kind === "エラー" ? null : `C:\\mock\\out\\${kind === "確定" ? "" : kind === "要確認" ? "review\\" : "not_card\\"}card_${i}.webp`,
+    saved_path: kind === "エラー" ? null : saved,
+    saved_paths: kind === "エラー" ? [] : [saved],
     ranked:
       kind === "要確認" || (kind === "カードなし" && i % 2 === 0)
         ? [
@@ -165,7 +167,7 @@ export async function invoke(command: string, args: Record<string, unknown> = {}
     case "get_state":
       return {
         version: "0.1.0",
-        user_data: "C:\\Users\\mock\\AppData\\Roaming\\mdript-prototype",
+        user_data: "C:\\Users\\mock\\AppData\\Roaming\\mdript-v2",
         default_output: "C:\\Users\\mock\\Pictures\\mdript",
         config,
         data: { ...data },
@@ -186,17 +188,22 @@ export async function invoke(command: string, args: Record<string, unknown> = {}
       if (busy) throw "いま処理中です。終わるまでお待ちください。";
       await pause(400);
       const source = String(args.path);
+      const saved = `C:\\mock\\out\\card_new_${Date.now() % 100000}.webp`;
       return {
-        source,
-        status: "確定",
-        card_id: 4003,
-        name: SAMPLE_NAMES[0],
-        distance: 0,
-        margin: 20,
-        saved_path: `C:\\mock\\out\\card_new_${Date.now() % 100000}.webp`,
-        ranked: [[0, "4003"]],
-        note: "",
-        english: false,
+        result: {
+          source,
+          status: "確定",
+          card_id: 4003,
+          name: SAMPLE_NAMES[0],
+          distance: 0,
+          margin: 20,
+          saved_path: saved,
+          saved_paths: [saved],
+          ranked: [[0, "4003"]],
+          note: "",
+          english: false,
+        },
+        csv_error: null,
       };
     }
     case "describe_cards":
@@ -219,7 +226,10 @@ export async function invoke(command: string, args: Record<string, unknown> = {}
       data.hashes += 1;
       return { message: "照合用ハッシュを追加しました", reprocess: true };
     case "remove_review_copy":
-      console.info("[mock remove_review_copy]", args.path, args.output);
+      console.info("[mock remove_review_copy]", args.paths, args.output);
+      return;
+    case "shutdown":
+      finish?.(true);
       return;
     case "open_folder":
       console.info("[mock open_folder]", args.path);

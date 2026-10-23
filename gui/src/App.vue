@@ -6,11 +6,15 @@ import type {
   Candidate,
   CardRef,
   Config,
+  CsvError,
   DataSummary,
   IdentifyDone,
   IdentifyProgress,
   IdentifyResult,
   LearnResult,
+  Migration,
+  ProcessArgs,
+  Reprocessed,
   UpdateDone,
 } from "./types";
 
@@ -97,6 +101,9 @@ async function refreshData() {
   }
 }
 
+// いま走っている（直近の）処理の条件。届いた結果に付けて、あとから登録するときに使う
+let runArgs: ProcessArgs | null = null;
+
 // ---- 結果一覧（まとめて反映して、行が増えても重くならないようにする） ----
 let pending: IdentifyResult[] = [];
 let flushScheduled = false;
@@ -115,6 +122,7 @@ function flushRows() {
 }
 
 function queueRow(result: IdentifyResult) {
+  if (runArgs) result.args = runArgs;
   pending.push(result);
   if (!flushScheduled) {
     flushScheduled = true;
@@ -194,7 +202,9 @@ const candidates = ref<Candidate[]>([]);
 const query = ref("");
 const found = ref<CardRef[]>([]);
 const registering = ref(false);
-const locked = computed(() => !!busy.value || registering.value);
+// ウィンドウを閉じる途中。処理の完了を待っているあいだは新しい操作を始めない
+const closing = ref(false);
+const locked = computed(() => !!busy.value || registering.value || closing.value);
 let panelToken = 0;
 let searchToken = 0;
 let searchTimer: number | undefined;
@@ -252,23 +262,31 @@ async function register(cid: string) {
   const index = selected.value;
   const row = current.value;
   if (index === null || !row || locked.value) return;
+  // 再処理と古いコピーの掃除は、この結果を作ったときの出力先・設定で行う（画面の現在値は使わない）
+  const args = row.args;
+  if (!args) {
+    await message("この結果の処理条件が分からないため、登録できません。", "error");
+    return;
+  }
   registering.value = true;
   try {
     const learned = await invoke<LearnResult>("learn_card", { cid, source: row.source });
     if (!learned.reprocess) {
       await message(learned.message);
     } else {
-      const out = output.value.trim();
-      const fresh = await invoke<IdentifyResult>("identify_one", { path: row.source, args: identifyArgs(out) });
-      const old = row.saved_path;
+      const again = await invoke<Reprocessed>("identify_one", { path: row.source, args });
+      const fresh: IdentifyResult = { ...again.result, args };
+      const old = row.saved_paths ?? (row.saved_path ? [row.saved_path] : []);
       if (rows.value[index] !== row) return; // 一覧が入れ替わっていたら書き戻さない
       rows.value[index] = fresh;
       triggerRef(rows);
       closePanel();
       if (fresh.status === "確定") {
-        if (old && old !== fresh.saved_path) {
+        const kept = new Set(fresh.saved_paths ?? []);
+        const stale = old.filter((path) => !kept.has(path));
+        if (stale.length) {
           try {
-            await invoke("remove_review_copy", { path: old, output: out });
+            await invoke("remove_review_copy", { paths: stale, output: args.output });
           } catch (e) {
             console.error(e);
           }
@@ -277,10 +295,11 @@ async function register(cid: string) {
         await selectRow(index);
       }
       status.value = `${learned.message}: ${fresh.status}`;
+      if (again.csv_error) await warnCsv(again.csv_error);
     }
     await refreshData();
   } catch (e) {
-    await message(String(e), "error");
+    if (!closing.value) await message(String(e), "error");
   } finally {
     registering.value = false;
   }
@@ -293,12 +312,13 @@ function onKey(e: KeyboardEvent) {
 // ---- 入力 ----
 async function guardBusy(): Promise<boolean> {
   // 登録（learn → 判定し直し）の途中も処理中として扱い、一覧を空にさせない
+  if (closing.value) return true;
   if (!busy.value && !registering.value) return false;
   await message("いま処理中です。終わるまでお待ちください。");
   return true;
 }
 
-function identifyArgs(out: string) {
+function identifyArgs(out: string): ProcessArgs {
   return {
     output: out,
     save_format: format.value,
@@ -326,6 +346,7 @@ async function start(paths: string[]) {
   }
   await saveConfig();
   clearRows();
+  runArgs = identifyArgs(out);
   done.value = 0;
   total.value = 0;
   status.value = "処理中...";
@@ -333,7 +354,7 @@ async function start(paths: string[]) {
   try {
     await invoke("start_identify", {
       paths,
-      args: identifyArgs(out),
+      args: runArgs,
     });
   } catch (e) {
     busy.value = null;
@@ -418,6 +439,13 @@ function onIdentifyProgress(p: IdentifyProgress) {
   queueRow(p.result);
 }
 
+async function warnCsv(csv: CsvError) {
+  if (closing.value) return;
+  await message(`ログを保存できませんでした。
+${csv.path}
+${csv.message}`, "warning");
+}
+
 function onIdentifyDone(d: IdentifyDone) {
   flushRows();
   busy.value = null;
@@ -433,6 +461,10 @@ function onIdentifyDone(d: IdentifyDone) {
   status.value =
     `${d.cancelled ? "中止" : "完了"}: 確定 ${d.confirmed} / 要確認 ${d.review} / ` +
     `カードなし ${d.not_card} / エラー ${d.error}（重複スキップ ${d.skipped}） ${(d.seconds ?? 0).toFixed(1)} 秒`;
+  if (d.csv_error) {
+    status.value += " / ログを保存できませんでした";
+    warnCsv(d.csv_error);
+  }
 }
 
 function onUpdateProgress(text: string) {
@@ -444,6 +476,7 @@ async function onUpdateDone(d: UpdateDone) {
   busy.value = null;
   updateOpen.value = false;
   await refreshData();
+  if (closing.value) return;
   if (d.error) {
     status.value = "エラーが発生しました";
     await message(d.error, "error");
@@ -451,6 +484,21 @@ async function onUpdateDone(d: UpdateDone) {
     status.value = d.message ?? "";
     await message(d.message ?? "", "info");
   }
+}
+
+// 旧アプリのデータを取り込んだとき（初回だけ）に知らせる
+const MIGRATED_NAMES: Record<string, string> = {
+  "config.json": "設定",
+  "card_names.json": "カード名",
+  "card_hashes_user.json": "登録した照合データ",
+};
+async function reportMigration(m: Migration) {
+  const names = (files: string[]) => files.map((f) => MIGRATED_NAMES[f] ?? f).join("、");
+  const lines: string[] = [];
+  if (m.error) lines.push(`旧アプリのデータを取り込めませんでした: ${m.error}`);
+  if (m.copied?.length) lines.push(`旧アプリの${names(m.copied)}を引き継ぎました。`);
+  if (m.corrupt?.length) lines.push(`読めなかったため引き継がなかったもの: ${names(m.corrupt)}`);
+  if (lines.length) await message(lines.join("\n"), m.error || m.corrupt?.length ? "warning" : "info");
 }
 
 // ---- 表示 ----
@@ -487,6 +535,7 @@ onMounted(async () => {
   english.value = labelOf(ENGLISH, config.english, "英語名で保存");
   split.value = labelOf(SPLIT, config.split, "分けない");
   status.value = "画像かフォルダをここにドロップしてください";
+  if (state.migration) await reportMigration(state.migration);
 
   unlisten.push(
     await listen<IdentifyProgress>("identify-progress", onIdentifyProgress),
@@ -499,10 +548,13 @@ onMounted(async () => {
     ),
   );
   await onClose(async () => {
+    // 処理・更新・登録のあとの再処理が、中止を受けて保存と記録を終えるまで閉じない
+    closing.value = true;
+    if (busy.value || registering.value) status.value = "終了しています...";
     try {
-      await invoke("stop");
-    } catch {
-      // 閉じる処理を止めない
+      await invoke("shutdown");
+    } catch (e) {
+      console.error(e);
     }
     await saveConfig();
   });
@@ -702,8 +754,14 @@ onBeforeUnmount(() => {
         <template v-else>
           <div class="dialog-title">カードデータ更新</div>
           <div class="dialog-actions column">
-            <button @click="runUpdate(false)">カード名を取得</button>
-            <button @click="runUpdate(true)">新しいカードセットを取り込む</button>
+            <div class="update-choice">
+              <button aria-describedby="update-names-description" @click="runUpdate(false)">カード名を取得</button>
+              <p id="update-names-description">保存名に使うカード名を更新します。</p>
+            </div>
+            <div class="update-choice">
+              <button aria-describedby="update-cards-description" @click="runUpdate(true)">新しいカードセットを取り込む</button>
+              <p id="update-cards-description">新カードや再録イラストの判定用データを追加します。カード名も更新します。</p>
+            </div>
             <button class="plain" @click="updateOpen = false">閉じる</button>
           </div>
         </template>
@@ -1191,6 +1249,20 @@ input[type="checkbox"] {
 }
 .dialog-actions.column {
   flex-direction: column;
+}
+.update-choice {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.update-choice + .update-choice {
+  margin-top: 8px;
+}
+.update-choice p {
+  margin: 0;
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.5;
 }
 .busy-text {
   min-height: 1.4em;

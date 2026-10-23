@@ -818,6 +818,11 @@ impl Sequencer {
         drop(state);
 
         let saved_path = display_path(&reservation.paths[0]);
+        let saved_paths: Vec<String> = reservation
+            .paths
+            .iter()
+            .map(|path| display_path(path))
+            .collect();
         let mut pending = PendingGuard {
             sequencer: self,
             reservation: Some(reservation),
@@ -831,6 +836,8 @@ impl Sequencer {
         drop(pending);
         written?;
         result["saved_path"] = json!(saved_path);
+        // この結果が実際に作ったファイルすべて（both 形式なら 2 つ）。登録後の掃除はこれだけを消す
+        result["saved_paths"] = json!(saved_paths);
         Ok(result)
     }
 }
@@ -847,6 +854,13 @@ pub fn run(args: Vec<OsString>) -> Result<(), String> {
     let (o, paths) = parse(args)?;
     let summary = identify_paths(&o, paths, &AtomicBool::new(false), &|_, _, _| {})?;
     println!("{summary}");
+    if let Some(csv) = summary["csv_error"].as_object() {
+        eprintln!(
+            "warning: could not write the log file {}: {}",
+            csv["path"].as_str().unwrap_or(""),
+            csv["message"].as_str().unwrap_or("")
+        );
+    }
     let error = summary["error"].as_u64().unwrap_or(0);
     if error > 0 {
         return Err(format!("{error} input(s) failed"));
@@ -933,11 +947,16 @@ pub fn identify_paths(
             skipped += 1;
         }
     }
-    if o.csv && !o.dry && !results.is_empty() {
-        let _ = crate::csv_log::write_csv(&o.output, &results);
-    }
+    // ログを書けなくても画像の結果は残す。件数には混ぜず、別に知らせる
+    let csv_error = if o.csv && !o.dry && !results.is_empty() {
+        crate::csv_log::write_csv(&o.output, &results).err().map(
+            |e| json!({"path":display_path(&o.output.join("log.csv")),"message":e.to_string()}),
+        )
+    } else {
+        None
+    };
     Ok(
-        json!({"confirmed":confirmed,"review":review,"not_card":not_card,"error":error,"skipped":skipped,"seconds":started.elapsed().as_secs_f64(),"total":paths.len(),"cancelled":cancel.load(Ordering::SeqCst),"results":results,"catalog_hashes":catalog.hash_count()}),
+        json!({"confirmed":confirmed,"review":review,"not_card":not_card,"error":error,"skipped":skipped,"seconds":started.elapsed().as_secs_f64(),"total":paths.len(),"cancelled":cancel.load(Ordering::SeqCst),"results":results,"catalog_hashes":catalog.hash_count(),"csv_error":csv_error}),
     )
 }
 
@@ -1285,6 +1304,118 @@ mod tests {
                 .is_err()
         );
         assert!(!outside.exists());
+    }
+    fn plain_input(temp: &Temp) -> PathBuf {
+        let input = temp.0.join("input");
+        fs::create_dir_all(&input).unwrap();
+        RgbImage::from_pixel(30, 40, image::Rgb([10, 20, 30]))
+            .save(input.join("shot.png"))
+            .unwrap();
+        input
+    }
+    fn run_one(o: &Options, input: PathBuf) -> Value {
+        identify_paths(o, vec![input], &AtomicBool::new(false), &|_, _, _| {}).unwrap()
+    }
+    #[test]
+    fn results_list_every_file_they_created() {
+        let temp = Temp::new();
+        let input = plain_input(&temp);
+        for (format, count) in [("webp", 1), ("png", 1), ("both", 2)] {
+            let mut o = options(&temp);
+            o.output = temp.0.join(format!("output-{format}"));
+            o.format = format.into();
+            let summary = run_one(&o, input.clone());
+            let result = &summary["results"][0];
+            let saved: Vec<&str> = result["saved_paths"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .filter_map(Value::as_str)
+                .collect();
+            assert_eq!(saved.len(), count, "{format}");
+            assert_eq!(result["saved_path"], saved[0], "{format}");
+            assert!(saved.iter().all(|path| Path::new(path).is_file()));
+            assert!(summary["csv_error"].is_null());
+        }
+    }
+    #[test]
+    fn cancel_returns_only_after_started_images_are_written_and_logged() {
+        let temp = Temp::new();
+        let input = temp.0.join("input");
+        fs::create_dir_all(&input).unwrap();
+        for i in 0..6u8 {
+            RgbImage::from_pixel(60, 80, image::Rgb([i * 20, 20, 30]))
+                .save(input.join(format!("shot{i}.png")))
+                .unwrap();
+        }
+        for format in ["webp", "both"] {
+            let mut o = options(&temp);
+            o.output = temp.0.join(format!("cancel-{format}"));
+            o.format = format.into();
+            o.workers = 2;
+            let cancel = AtomicBool::new(false);
+            let summary = identify_paths(&o, vec![input.clone()], &cancel, &|done, _, _| {
+                if done == 1 {
+                    cancel.store(true, Ordering::SeqCst);
+                }
+            })
+            .unwrap();
+            assert_eq!(summary["cancelled"], true);
+            let results = summary["results"].as_array().unwrap();
+            assert!(!results.is_empty() && results.len() < 6, "{format}");
+            let expected: usize = results
+                .iter()
+                .map(|r| r["saved_paths"].as_array().map_or(0, Vec::len))
+                .sum();
+            let mut on_disk = 0;
+            for entry in fs::read_dir(o.output.join("not_card")).unwrap() {
+                let entry = entry.unwrap();
+                assert!(
+                    entry.metadata().unwrap().len() > 0,
+                    "empty reservation left"
+                );
+                on_disk += 1;
+            }
+            assert_eq!(on_disk, expected, "{format}");
+            let log = fs::read_to_string(o.output.join("log.csv")).unwrap();
+            assert_eq!(log.lines().count(), results.len() + 1, "{format}");
+        }
+    }
+    #[test]
+    fn csv_failure_is_reported_without_counting_as_image_error() {
+        let temp = Temp::new();
+        let input = plain_input(&temp);
+        let o = options(&temp);
+        fs::create_dir_all(o.output.join("log.csv")).unwrap();
+        let summary = run_one(&o, input);
+        assert_eq!(summary["error"], 0);
+        assert_eq!(summary["total"], 1);
+        let saved = summary["results"][0]["saved_path"].as_str().unwrap();
+        assert!(Path::new(saved).is_file());
+        let csv = &summary["csv_error"];
+        assert!(csv["path"].as_str().unwrap().ends_with("log.csv"));
+        assert!(!csv["message"].as_str().unwrap().is_empty());
+    }
+    #[cfg(windows)]
+    #[test]
+    fn locked_log_file_is_reported() {
+        use std::os::windows::fs::OpenOptionsExt;
+        let temp = Temp::new();
+        let input = plain_input(&temp);
+        let o = options(&temp);
+        fs::create_dir_all(&o.output).unwrap();
+        let log = o.output.join("log.csv");
+        fs::write(&log, b"").unwrap();
+        // 他のアプリ（Excel など）が開いているのと同じく、共有なしで開いておく
+        let _lock = OpenOptions::new()
+            .read(true)
+            .share_mode(0)
+            .open(&log)
+            .unwrap();
+        let summary = run_one(&o, input);
+        assert_eq!(summary["error"], 0);
+        assert!(summary["csv_error"]["path"].is_string());
+        assert!(Path::new(summary["results"][0]["saved_path"].as_str().unwrap()).is_file());
     }
     #[test]
     fn rounded_mask_matches_pillow_fixture() {
