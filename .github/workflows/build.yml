@@ -2,17 +2,22 @@ name: build
 
 on:
   push:
-    branches: [main]
+    branches: [main, claude/tauri-ui]
     tags: ["v*"]
   pull_request:
   workflow_dispatch:
 
-# 既定は読み取りのみ。リリースへの添付をするジョブだけ書き込みを許可する
+# 読み取りのみ。この workflow はリリースへの添付も公開もしない。
+# 配布物は artifact として作り、中身を確かめてから公開の手順を別に決める。
 permissions:
   contents: read
 
+env:
+  CARGO_TERM_COLOR: always
+
 jobs:
-  test:
+  # 新アプリが照合の基準にしている旧Python実装のテスト（配布はしない）
+  python-reference:
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
@@ -24,13 +29,42 @@ jobs:
       - run: pip install -r requirements.txt
       - run: python -m unittest discover -s tests -v
 
-  windows-exe:
-    needs: test
-    # exe はタグを打ったとき（と手動実行）だけ作る
-    if: startsWith(github.ref, 'refs/tags/') || github.event_name == 'workflow_dispatch'
+  core:
     runs-on: windows-latest
-    permissions:
-      contents: write
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - run: rustup component add rustfmt clippy
+      - run: cargo fmt --manifest-path rust/Cargo.toml --all --check
+      - run: cargo test --manifest-path rust/Cargo.toml --workspace --locked
+      - run: cargo clippy --manifest-path rust/Cargo.toml --workspace --all-targets --locked -- -D warnings
+
+  gui:
+    runs-on: windows-latest
+    defaults:
+      run:
+        working-directory: gui
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: gui/package-lock.json
+      - run: rustup component add rustfmt clippy
+      - run: npm ci
+      # vue-tsc による型検査と本番ビルド。Tauri 側のテストは dist/ が必要なので先に行う
+      - run: npm run build
+      - run: cargo fmt --manifest-path src-tauri/Cargo.toml --all --check
+      - run: cargo test --manifest-path src-tauri/Cargo.toml --locked
+      - run: cargo clippy --manifest-path src-tauri/Cargo.toml --all-targets --locked -- -D warnings
+
+  package:
+    needs: [core, gui]
+    runs-on: windows-latest
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
@@ -38,24 +72,30 @@ jobs:
       - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
         with:
           python-version: "3.12"
-      - name: 依存関係
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: gui/package-lock.json
+      # タグのときは製品バージョンと一致していなければ止める（v1.x など旧アプリの版番号も拒否）
+      - name: 製品バージョンの確認
+        env:
+          TAG: ${{ startsWith(github.ref, 'refs/tags/') && github.ref_name || '' }}
         run: |
-          python -m pip install --upgrade pip
-          pip install -r requirements.txt pyinstaller
+          if ($env:TAG) { python tools/check_release_version.py --tag $env:TAG } else { python tools/check_release_version.py }
       - name: exe をビルド
-        run: pyinstaller --noconfirm mdript.spec
-      - name: SHA-256 を作る
+        working-directory: gui
         run: |
-          cd dist
-          Get-FileHash *.exe -Algorithm SHA256 | ForEach-Object { "$($_.Hash.ToLower())  $(Split-Path $_.Path -Leaf)" } | Set-Content -Encoding utf8 SHA256SUMS.txt
+          npm ci
+          npm run tauri -- build --no-bundle
+      - name: 配布物を作る（zip・SHA256・ライセンス文書）
+        env:
+          TAG: ${{ startsWith(github.ref, 'refs/tags/') && github.ref_name || '' }}
+        run: |
+          if ($env:TAG) { python tools/package_release.py --tag $env:TAG } else { python tools/package_release.py }
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
-          name: mdript-windows
+          name: mdript-windows-x64
           path: dist/*
-      - name: リリースに添付
-        if: startsWith(github.ref, 'refs/tags/')
-        uses: softprops/action-gh-release@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65 # v2
-        with:
-          files: |
-            dist/*.exe
-            dist/SHA256SUMS.txt
+          if-no-files-found: error
+          retention-days: 14

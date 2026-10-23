@@ -10,3 +10,6 @@ output/
 sample/
 CLAUDE.md
 AGENTS.md
+
+/rust/target/
+/rust/local-results/
