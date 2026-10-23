@@ -5,7 +5,7 @@ import { getCurrentWebview } from "@tauri-apps/api/webview";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { ask as tauriAsk, message as tauriMessage, open } from "@tauri-apps/plugin-dialog";
 
-const TITLE = "開闢 - MDカード画像ツール";
+const TITLE = "開闢 — MDカード画像ツール";
 const IMAGE_FILTER = [{ name: "画像", extensions: ["png", "jpg", "jpeg", "webp", "bmp"] }];
 
 type Mock = typeof import("./mock");

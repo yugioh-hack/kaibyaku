@@ -1,25 +1,37 @@
-# 開闢（かいびゃく）― MDカード画像ツール（mdript）
+# 開闢（かいびゃく）— MDカード画像ツール
 
-遊戯王 マスターデュエル（MD）のスクリーンショットからカード画像を切り抜いてカード名で保存する Windows 向けの非公式ツールです。
+遊戯王 マスターデュエル（MD）のスクリーンショットからカード画像を切り抜いて、カード名で保存する Windows 向けの非公式ツールです。
 
-画面を一新し、旧アプリより画像処理が速く、アプリ本体も軽量になりました。画像やフォルダをドロップするだけでまとめて処理でき、保存したカード画像を一覧で確認できます。
+2.0.0 は画面を一新しました。旧アプリより処理が速く、アプリ本体も軽量です。画像やフォルダをドロップするだけでまとめて処理でき、保存したカード画像を一覧で確認できます。
 
 ## ダウンロード
 
-**[新アプリ v2.0.0-beta.1 をダウンロード（Windows用zip）](https://github.com/yugioh-hack/mdript/releases/download/v2.0.0-beta.1/mdript-v2.0.0-beta.1-windows-x64.zip)**
+**[開闢 2.0.0 をダウンロード（Windows用zip）](https://github.com/yugioh-hack/mdript/releases/download/v2.0.0/mdript-v2.0.0-windows-x64.zip)**
 
-[ベータ版のリリース情報・SHA-256](https://github.com/yugioh-hack/mdript/releases/tag/v2.0.0-beta.1)
+[リリース情報・SHA-256](https://github.com/yugioh-hack/mdript/releases/tag/v2.0.0)
 
-新アプリは **v2.0.0-beta.1（ベータ版）** として公開しています。リリースの一覧で「Latest」になっている **v1.4.1 は旧アプリ** です。旧アプリを使う場合は、[旧アプリの使い方](https://github.com/yugioh-hack/mdript/blob/v1.4.1/README.md)を参照してください。
+Python版の **v1.4.1 は旧アプリ** です。旧アプリを使う場合は、[旧アプリの使い方](https://github.com/yugioh-hack/mdript/blob/v1.4.1/README.md)を参照してください。
 
 株式会社KONAMIおよび遊戯王公式とは関係ありません。
+
+## 起動方法
+
+zipを展開し、`mdript.exe` をダブルクリックします。インストーラはなく、開発ツールも要りません。
+
+WebView2 Runtime が必要です。多くの環境では導入済みですが、起動しないときは Microsoft の [WebView2 のページ](https://developer.microsoft.com/microsoft-edge/webview2/)から Evergreen Standalone Installer を入手してください。動作を確認した環境は Windows 11 です。
+
+exeにコード署名はないため、Windows の警告が出る場合があります。リリースページの `SHA256SUMS.txt` と照合できます。
+
+```powershell
+Get-FileHash .\mdript.exe -Algorithm SHA256
+```
 
 ## できること
 
 - 画像・フォルダのドラッグ＆ドロップによる一括処理。ファイル・フォルダ選択にも対応。
 - カードのイラストを見分け、カード名を付けて保存。
 - 画面の大きさに合わせて、カードの位置を自動で見つけます。解像度を選ぶ必要はありません。
-- WebP／PNG／両形式での出力、カードの角丸・透過、同じイラストの重複スキップ。
+- WebP／PNG／両方での出力、カードの角丸・透過、同じイラストの重複スキップ。
 - サムネイル付きの結果一覧と、「確定」「要確認」「カードなし」「エラー」での絞り込み。
 - 行を選択して画像と候補を確認。「要確認」「カードなし」の画像はカード名・IDで検索して照合データへ登録。
 - 日本語・英語のスクリーンショットを判別し、保存名と言語別フォルダを選択。
@@ -33,13 +45,9 @@
 
 マスターデュエルでカード1枚を中央に大きく表示し、ゲーム画面全体を撮影します。全画面での撮影を推奨します。ウィンドウ表示やゲームのUI変更によって、位置の検出が外れることがあります。
 
-### 2. 起動してカード名を取得する
+### 2. カード名を取得する
 
-ダウンロードしたzipを展開し、`mdript.exe` をダブルクリックして起動します。ベータ版は上の「ダウンロード」の v2.0.0-beta.1 にあります。開発ツールを入れる必要はありません。
-
-WebView2 Runtime が必要です。多くの環境では導入済みですが、起動しないときは Microsoft の [WebView2 のページ](https://developer.microsoft.com/microsoft-edge/webview2/)から Evergreen Standalone Installer を入手してください。exeにコード署名はないため、Windows の警告が出る場合があります。配布ページに添える `SHA256SUMS.txt` と照合できます。
-
-初回はカード名を取得するか尋ねられます。あとから取得する場合は［カードデータ更新］→［カード名を取得］を選びます。カード名を取得しなくても処理できますが、保存名は `cid_12345.webp` のようなカードIDになります。
+初回の起動時にカード名を取得するか尋ねられます。あとから取得する場合は［カードデータ更新］→［カード名を取得］を選びます。カード名を取得しなくても処理できますが、保存名は `cid_12345.webp` のようなカードIDになります。
 
 ### 3. 出力先を選び、画像をドロップする
 
@@ -70,7 +78,9 @@ WebView2 Runtime が必要です。多くの環境では導入済みですが、
 └─ log.csv      # 日時・状態・名前・ID・距離・保存先・備考・入力元
 ```
 
-別イラストなどで保存名が重なると `_alt1` などを付けます。重複しているためスキップした場合は、新しい画像を保存しません。「要確認」「カードなし」の保存は設定で無効にできます。`log.csv` は追記形式です。ログを書き込めなかったとき（Excelで開いている場合など）は、画像の結果はそのままで、ログを保存できなかったことと対象のパスを画面に表示します。コマンドライン版では終了結果の `csv_error` と標準エラー出力に出ます。
+別イラストなどで保存名が重なると `_alt1` などを付けます。重複しているためスキップした場合は、新しい画像を保存しません。「要確認」「カードなし」の保存は設定で無効にできます。
+
+`log.csv` は追記形式です。ログを書き込めなかったとき（Excelで開いている場合など）は、画像の結果はそのままで、ログを保存できなかったことと対象のパスを画面に表示します。コマンドライン版では終了結果の `csv_error` と標準エラー出力に出ます。設定を保存できなかったときも画面に表示し、次の起動では前の設定に戻ります。
 
 ### 設定
 
@@ -100,11 +110,11 @@ WebView2 Runtime が必要です。多くの環境では導入済みですが、
 
 ## 保存データと通信
 
-| 内容 | 新アプリ | 旧アプリ |
+| 内容 | 開闢 2.0 | 旧アプリ（Python版） |
 | --- | --- | --- |
 | 設定・カード名・追加ハッシュ | `%APPDATA%\mdript-v2\` | `%APPDATA%\mdript\` |
 
-初回起動時に、旧アプリの設定・カード名・登録データを新アプリの保存先へコピーします。旧アプリのフォルダは読み取るだけで、変更しません。旧アプリへはそのまま戻れます。読めないファイルは取り込まず、原本を `%APPDATA%\mdript-v2\legacy-backup\` に控えます。新アプリ側にすでにあるデータは上書きせず、取り込みは一度だけです。
+初回起動時に、旧アプリの設定・カード名・登録データを新しい保存先へコピーします。旧アプリのフォルダは読み取るだけで、変更しません。旧アプリへはそのまま戻れます。読めないファイルは取り込まず、原本を `%APPDATA%\mdript-v2\legacy-backup\` に控えます。新しい保存先にすでにあるデータは上書きせず、取り込みは一度だけです。
 
 カードを見分けるためのデータはアプリに含まれています。カード名・マスター画像は同梱しません。データを更新するときは公式データベース `www.db.yugioh-card.com` のHTTPSへアクセスします。外部ホストへのリダイレクトは拒否し、要求の間隔を0.4秒以上空けます。解析用の入力画像・入力ファイル名・フォルダ名は送信しません。
 
@@ -114,21 +124,23 @@ WebView2 Runtime が必要です。多くの環境では導入済みですが、
 
 ## 技術的な詳細
 
+画面は Vue 3／TypeScript、アプリは Tauri 2、画像処理・保存・データ更新は Rust で実装しています。旧アプリは Python 版です。
+
 ### 処理速度とアプリの容量
 
 手元のスクリーンショット256枚を使ったコマンドライン版の測定では、既定の8ワーカーで旧アプリが13.62秒、新アプリが7.36秒でした。同じPCで各5回測った中央値です。画面の起動時間やメモリ使用量を測ったものではありません。
 
-アプリ本体のexeは、公開済みの旧アプリ v1.4.1 が31,899,470バイト、新アプリのローカルビルドが14,880,768バイトでした。新アプリは約15MBで、旧アプリの半分以下です。WebView2 Runtimeの容量は含みません。公開時のファイル容量はビルドによって変わります。
+アプリ本体のexeは、旧アプリ v1.4.1 が約31.9MB、開闢 2.0.0 が約14.9MBで、旧アプリの半分以下です（1MB=1,000,000バイト）。WebView2 Runtimeの容量は含みません。
 
-速度の測定条件は [Rust版のREADME](https://github.com/yugioh-hack/mdript/blob/claude/tauri-ui/rust/README.md) を参照してください。
+速度の測定条件は [Rust版のREADME](rust/README.md) を参照してください。
 
 ### カードの判定と検証
 
-カードのイラストを pHash で照合し、カード名を決めます。OCRは使いません。
+カードのイラストを pHash で照合し、カード名を決めます。OCRは使いません。カードの位置は、画像の高さから計算した標準の位置を試し、外れたときは画像から枠を検出して補正します。
 
 2026-10-23のRust版とPython版の比較では、手元のスクリーンショット256枚で状態・カードID・名前・言語・備考・保存名が一致しました（どちらも確定256件、うち重複スキップ4件）。距離または2位との差が異なる画像は8枚あり、既存資料に記録されているJPEGの復号差と同じ画像で差が出ました。
 
-この比較は旧版との互換性を確かめたもので、独立に正解を付けて精度を測定したものではありません。比較に使った実画像には「要確認」「カードなし」が含まれていません。ほかの解像度やウィンドウ表示で同じ結果になる保証もありません。旧版の約1万枚の精度や配布容量・速度の数字は、新UI版の性能を示す値としては掲載していません。
+この比較は旧アプリとの互換性を確かめたもので、独立に正解を付けて精度を測定したものではありません。比較に使った実画像には「要確認」「カードなし」が含まれていません。ほかの解像度やウィンドウ表示で同じ結果になる保証もありません。
 
 ### カードデータ更新の範囲
 
@@ -136,30 +148,26 @@ WebView2 Runtime が必要です。多くの環境では導入済みですが、
 
 ## 開発・ビルド
 
-新アプリは Rust／Tauri 版、旧アプリは Python 版です。新アプリのソースは `claude/tauri-ui` ブランチにあり、`main` は旧アプリです。製品名は改名案で、開発コード・リポジトリ名は `mdript` を継続する想定です。
-
-Windows の WebView2 Runtime が必要です。Pythonのインストールは不要です。
-
-新UIは Vue／TypeScript、アプリは Tauri 2、画像処理・保存・データ更新は Rust で実装しています。ブラウザで開く開発画面はモックを使うため、実際のファイルを処理して確認するにはTauriで起動してください。
+製品名は「開闢」、開発コード・リポジトリ名・exe名は `mdript` です。
 
 Windowsに、Node.js／npm、RustのMSVCツールチェーン、Visual Studio C++ Build Tools、WebView2を用意します。既存のロックファイルに合わせて依存関係を取得してください。
 
 ```powershell
 git clone https://github.com/yugioh-hack/mdript.git
-cd mdript
-git switch claude/tauri-ui
-cd gui
+cd mdript\gui
 npm ci
 npm run tauri -- dev
 ```
 
-リリース用exeをローカルで作るには、`gui/` で次を実行します。
+ブラウザで開く開発画面（`npm run dev`）はモックを使うため、実際のファイルを処理して確認するにはTauriで起動してください。
+
+リリース用exeをローカルで作るには、`gui/` で次を実行します。出力は `gui/src-tauri/target/release/mdript.exe` で、インストーラは作りません。
 
 ```powershell
 npm run tauri -- build --no-bundle
 ```
 
-出力は `gui/src-tauri/target/release/mdript.exe` です。インストーラは作りません。配布用のzip（exe・LICENSE・第三者ライセンス・SHA-256）は、ビルド後にリポジトリのルートで次を実行して `dist/` に作ります。
+配布用のzip（exe・LICENSE・第三者ライセンス・SHA-256）は、リポジトリのルートで次を実行して `dist/` に作ります。
 
 ```powershell
 python tools/package_release.py
@@ -178,7 +186,7 @@ cd gui
 npm run build
 ```
 
-GitHub Actions（`.github/workflows/build.yml`）は、上の検証コマンドとリリースexeのビルド、配布物の作成を行い、公開はせずartifactとして保存します。`v*` のタグでは、タグが製品バージョン（`tauri.conf.json`・Cargo・npm）と一致し、v2以降であることも確かめます。旧Python版はこのワークフローでは配布しません。公開前の評価と残っている課題は [リリース品質確認](https://github.com/yugioh-hack/mdript/blob/claude/tauri-ui/docs/release-readiness-2026-10-23.md) を参照してください。
+GitHub Actions（`.github/workflows/build.yml`）は、上の検証コマンドとリリースexeのビルド、配布物の作成を行い、artifactとして保存します。`v*` のタグでは、タグが製品バージョン（`tauri.conf.json`・Cargo・npm）と一致し、v2以降であることも確かめます。リリースへの添付は手動です。評価と残っている課題は [リリース品質確認](docs/release-readiness-2026-10-23.md) を参照してください。
 
 ### Rust CLI
 
@@ -189,8 +197,8 @@ cargo build --release --manifest-path rust/Cargo.toml --locked --bin mdript-cli
 .\rust\target\release\mdript-cli.exe identify C:\images --output C:\mdript-output --user-data C:\mdript-test-data --format webp
 ```
 
-`--output` と `--user-data` には互いに重ならない絶対パスを指定する必要があります。試作版では `%APPDATA%\mdript` の使用を拒否します。引数・更新・登録の詳細は [Rust版のREADME](https://github.com/yugioh-hack/mdript/blob/claude/tauri-ui/rust/README.md) を参照してください。
+`--output` と `--user-data` には互いに重ならない絶対パスを指定する必要があります。旧アプリの `%APPDATA%\mdript` は書き込み先として使えません。引数・更新・登録の詳細は [Rust版のREADME](rust/README.md) を参照してください。
 
 ## ライセンス
 
-ソースコードは [MIT License](LICENSE) です。Pillow由来の処理については [第三者ライセンス](https://github.com/yugioh-hack/mdript/blob/claude/tauri-ui/rust/third-party/Pillow-LICENSE.txt) も参照してください。カード画像・カード名などの権利は各権利者に帰属します。
+ソースコードは [MIT License](LICENSE) です。Pillow由来の処理については [第三者ライセンス](rust/third-party/Pillow-LICENSE.txt) も参照してください。配布するzipには、含まれる部品のライセンス文書 `THIRD-PARTY-NOTICES.txt` を同梱します。カード画像・カード名などの権利は各権利者に帰属します。

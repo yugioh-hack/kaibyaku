@@ -144,7 +144,11 @@ fn write_config(dir: &Path, config: &Map<String, Value>) -> Result<(), String> {
         serde_json::to_vec(config).map_err(|e| e.to_string())?,
     )
     .map_err(|e| e.to_string())?;
-    fs::rename(temporary, path).map_err(|e| e.to_string())
+    fs::rename(&temporary, path).map_err(|e| {
+        // 置き換えに失敗しても、書きかけの一時ファイルは残さない
+        let _ = fs::remove_file(&temporary);
+        e.to_string()
+    })
 }
 
 #[tauri::command]
@@ -523,7 +527,7 @@ pub fn run() {
         .setup(|app| {
             // アプリ名の右に版番号を出す
             if let Some(window) = app.get_webview_window("main") {
-                let title = format!("開闢 v{} - MDカード画像ツール", env!("CARGO_PKG_VERSION"));
+                let title = format!("開闢 v{} — MDカード画像ツール", env!("CARGO_PKG_VERSION"));
                 let _ = window.set_title(&title);
             }
             Ok(())
@@ -564,6 +568,21 @@ mod tests {
         assert_eq!(config.len(), 2);
         assert_eq!(config["output_dir"], "C:\\out");
         assert_eq!(config["recursive"], false);
+        fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn config_write_failure_is_an_error_and_leaves_no_temporary_file() {
+        let dir =
+            std::env::temp_dir().join(format!("mdript-gui-config-fail-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&dir);
+        fs::create_dir_all(dir.join("config.json")).unwrap();
+        let mut config = Map::new();
+        config.insert("output_dir".into(), json!(r"C:\out"));
+        assert!(write_config(&dir, &config).is_err());
+        assert!(!dir.join("config.json.tmp").exists());
+        // 保存先そのものを作れない場合も同じ
+        assert!(write_config(&dir.join("missing").join("deeper"), &config).is_err());
         fs::remove_dir_all(dir).unwrap();
     }
 

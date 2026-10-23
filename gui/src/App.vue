@@ -81,12 +81,26 @@ function currentConfig(): Config {
   };
 }
 
-async function saveConfig(extra: Config = {}) {
+// 保存に失敗したままの間は、知らせるのを1回だけにする（処理のたびに、閉じるときにも出さない）
+let saveFailureShown = false;
+
+async function saveConfig(extra: Config = {}): Promise<boolean> {
   config = { ...config, ...currentConfig(), ...extra };
   try {
     await invoke("save_config", { config });
+    saveFailureShown = false;
+    return true;
   } catch (e) {
     console.error(e);
+    if (!saveFailureShown) {
+      saveFailureShown = true;
+      try {
+        await message(`設定を保存できませんでした。次に起動したときは、前の設定に戻ります: ${e}`, "warning");
+      } catch (dialogError) {
+        console.error(dialogError); // 通知できなくても、処理と終了は止めない
+      }
+    }
+    return false;
   }
 }
 

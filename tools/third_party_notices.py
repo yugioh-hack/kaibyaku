@@ -129,7 +129,7 @@ def main(output: Path) -> None:
         raise SystemExit("ライセンス文がない依存があります。rust/third-party/supplement/ に補ってください:\n  " + "\n  ".join(missing))
 
     header = [
-        "第三者ライセンス（開闢 - MDカード画像ツール / mdript）",
+        "第三者ライセンス（開闢 — MDカード画像ツール / mdript）",
         "",
         "このアプリ自身のライセンスは同梱の LICENSE（MIT）です。",
         "以下は、実行ファイルに含まれる（または画面に組み込まれる）部品です。",

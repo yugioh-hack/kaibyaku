@@ -1,6 +1,6 @@
 """ビルド済みの mdript.exe から配布物（zip と SHA256SUMS.txt）を作る。
 
-    python tools/package_release.py [--tag v2.0.0-beta.1] [--out dist]
+    python tools/package_release.py [--tag v2.0.0] [--out dist]
 
 先に `npm run tauri -- build --no-bundle`（gui/ で）で exe を作っておく。
 公開（リリースへの添付）はしない。作った物は CI の artifact として確認する。
@@ -20,9 +20,10 @@ import third_party_notices
 ROOT = Path(__file__).resolve().parent.parent
 EXE = ROOT / "gui/src-tauri/target/release/mdript.exe"
 
-README = r"""開闢（かいびゃく）― MDカード画像ツール（mdript） {version}
+README = r"""開闢（かいびゃく）— MDカード画像ツール {version}
 
-遊戯王 マスターデュエルのスクリーンショットからカード画像を切り抜いて、カード名で保存する Windows 向けの非公式ツールです。
+遊戯王 マスターデュエル（MD）のスクリーンショットからカード画像を切り抜いて、カード名で保存する Windows 向けの非公式ツールです。
+Python版（v1.x）は旧アプリです。このツールは旧アプリとは別に動き、旧アプリのデータは変更しません。
 株式会社KONAMIおよび遊戯王公式とは関係ありません。
 
 ■ 起動
@@ -37,7 +38,7 @@ Microsoft の配布ページ（https://developer.microsoft.com/microsoft-edge/we
 
 ■ 署名について
 この exe にはコード署名がありません。Windows の SmartScreen が警告を出すことがあります。
-SHA256SUMS.txt のハッシュと照合してから実行してください。
+リリースページの SHA256SUMS.txt のハッシュと照合してから実行してください。
 
   PowerShell: Get-FileHash .\mdript.exe -Algorithm SHA256
 

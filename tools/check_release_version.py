@@ -1,6 +1,6 @@
 """新アプリの製品バージョンが各ファイルで一致していること（と、指定したタグと一致すること）を確かめる。
 
-    python tools/check_release_version.py [--tag v2.0.0-beta.1]
+    python tools/check_release_version.py [--tag v2.0.0]
 
 旧Pythonアプリ（v1.x）のタグは受け付けない。
 """
@@ -54,7 +54,7 @@ def check(tag: str | None) -> str:
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
-    parser.add_argument("--tag", help="リリースタグ（例: v2.0.0-beta.1）。省略するとファイル間の一致だけ見る")
+    parser.add_argument("--tag", help="リリースタグ（例: v2.0.0）。省略するとファイル間の一致だけ見る")
     args = parser.parse_args()
     print(check(args.tag))
     sys.exit(0)
