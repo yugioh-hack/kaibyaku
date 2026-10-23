@@ -410,7 +410,8 @@ struct Reservation {
 }
 enum Choice {
     Reserved(Reservation),
-    Skipped,
+    /// 同じイラストの既存ファイル
+    Skipped(PathBuf),
     Wait,
 }
 impl Reservation {
@@ -515,7 +516,7 @@ impl Saver {
                         u128::from_str_radix(hash, 16),
                     ) && (a ^ b).count_ones() <= 10
                     {
-                        return Ok(Choice::Skipped);
+                        return Ok(Choice::Skipped(p.clone()));
                     }
                 }
             }
@@ -553,7 +554,7 @@ impl Saver {
         }
         let mut reservation = match self.reserve(target, name, hash, o)? {
             Choice::Reserved(r) => r,
-            Choice::Skipped => return Ok((String::new(), SKIPPED.into())),
+            Choice::Skipped(_) => return Ok((String::new(), SKIPPED.into())),
             Choice::Wait => return Err("unexpected pending reservation".into()),
         };
         let path = display_path(&reservation.paths[0]);
@@ -587,7 +588,7 @@ fn prepare(path: &Path, catalog: &Catalog, o: &Options) -> Result<Prepared, Stri
         panic!("injected prepare panic");
     }
     let im = load_image(path)?;
-    let mut result = json!({"source":path,"status":"カードなし","card_id":"","name":"","distance":999,"margin":0,"saved_path":"","note":"","english":false,"box":null,"origin":null,"hash":null,"ranked":[],"stroke_ratio":null});
+    let mut result = json!({"source":path,"size":[im.width(),im.height()],"status":"カードなし","card_id":"","name":"","distance":999,"margin":0,"saved_path":"","note":"","english":false,"box":null,"origin":null,"hash":null,"ranked":[],"stroke_ratio":null});
     let stem = path.file_stem().unwrap_or_default().to_string_lossy();
     let Some(found) = identify(&im, catalog, &o.resolution) else {
         result["note"] = json!("照合できる画像がありません");
@@ -801,10 +802,12 @@ impl Sequencer {
                 .reserve(&task.target, &task.name, task.hash.as_deref(), o)
             {
                 Ok(Choice::Wait) => state = wait_recover(&self.changed, state),
-                Ok(Choice::Skipped) => {
+                Ok(Choice::Skipped(existing)) => {
                     if task.propagate_skip {
                         result["note"] = json!(SKIPPED);
                     }
+                    // 保存しなかった代わりに、同じイラストの既存ファイルを示す（画面のサムネイル用。CSV には出さない）
+                    result["existing_path"] = json!(display_path(&existing));
                     return Ok(result);
                 }
                 Ok(Choice::Reserved(reservation)) => break reservation,

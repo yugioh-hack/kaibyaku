@@ -37,6 +37,11 @@ export interface IdentifyResult {
   distance: number;
   margin: number;
   saved_path: string | null;
+  /** 重複でスキップしたときの、同じイラストの既存ファイル */
+  existing_path?: string;
+  /** 元画像の大きさ [幅, 高さ] と、判定に使ったカードの枠 [左, 上, 右, 下] */
+  size?: [number, number];
+  box?: [number, number, number, number] | null;
   ranked?: Array<[number, string]>;
   note: string;
   english: boolean;

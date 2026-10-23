@@ -186,6 +186,8 @@ watch(
 
 // ---- 確認パネル ----
 const REVIEWABLE = ["要確認", "カードなし"];
+// 登録できるのは要確認とカードなしだけ。確定・エラーは画像と判定を見るだけ
+const canRegister = computed(() => !!current.value && REVIEWABLE.includes(current.value.status));
 const selected = ref<number | null>(null);
 const current = computed(() => (selected.value === null ? null : (rows.value[selected.value] ?? null)));
 const candidates = ref<Candidate[]>([]);
@@ -209,7 +211,7 @@ function closePanel() {
 
 async function selectRow(i: number) {
   const r = rows.value[i];
-  if (!r || !REVIEWABLE.includes(r.status) || selected.value === i) return;
+  if (!r || selected.value === i) return;
   closePanel();
   selected.value = i;
   const token = panelToken;
@@ -456,7 +458,18 @@ const distanceText = (r: IdentifyResult) => (r.distance < 999 ? String(r.distanc
 const fileName = (path: string) => path.split(/[\\/]/).pop() ?? path;
 
 const unlisten: Array<() => void> = [];
-const thumb = (r: IdentifyResult) => (r.saved_path ? imageUrl(r.saved_path) : "");
+// 表示する切り抜き画像。保存した画像 → 重複でスキップした元の既存画像 → 元画像のカードの枠だけ、の順
+function cardImage(r: IdentifyResult): { src: string; style?: Record<string, string> } {
+  const saved = r.saved_path || r.existing_path;
+  if (saved) return { src: imageUrl(saved) };
+  if (r.box && r.size) {
+    const [l, t, right, bottom] = r.box;
+    const [w, h] = r.size;
+    const inset = `inset(${t}px ${w - right}px ${h - bottom}px ${l}px)`;
+    return { src: imageUrl(r.source), style: { objectViewBox: inset } };
+  }
+  return { src: imageUrl(r.source) };
+}
 
 onMounted(async () => {
   window.addEventListener("keydown", onKey);
@@ -610,11 +623,18 @@ onBeforeUnmount(() => {
             v-for="{ r, i } in windowRows"
             :key="i"
             class="row item"
-            :class="['s-' + STATUSES.indexOf(r.status), { pick: REVIEWABLE.includes(r.status), sel: selected === i }]"
+            :class="['s-' + STATUSES.indexOf(r.status), { sel: selected === i }]"
             @click="selectRow(i)"
           >
             <span class="thumb">
-              <img v-if="r.saved_path" :src="thumb(r)" loading="lazy" decoding="async" alt="" />
+              <img
+                v-if="r.status !== 'エラー'"
+                :src="cardImage(r).src"
+                :style="cardImage(r).style"
+                loading="lazy"
+                decoding="async"
+                alt=""
+              />
             </span>
             <span class="state">{{ r.status }}</span>
             <span class="name">
@@ -638,21 +658,28 @@ onBeforeUnmount(() => {
           <button class="plain close" aria-label="閉じる" @click="closePanel">×</button>
         </div>
         <div class="review-body">
-          <img class="crop" :src="imageUrl(current.saved_path || current.source)" alt="" />
+          <img
+            v-if="current.status !== 'エラー'"
+            class="crop"
+            :src="cardImage(current).src"
+            :style="cardImage(current).style"
+            alt=""
+          />
           <div class="now" :class="'s-' + STATUSES.indexOf(current.status)">
             <span class="state">{{ current.status }}</span>
             <span class="name">{{ current.name || "-" }}</span>
             <span class="num">{{ distanceText(current) }}</span>
           </div>
+          <div v-if="current.note" class="note">{{ current.note }}</div>
           <ul v-if="candidates.length" class="cands">
             <li v-for="c in candidates" :key="c.cid">
               <span class="name" :title="c.name">{{ c.name }}</span>
               <span class="num">{{ c.distance }}</span>
-              <button :disabled="locked" @click="register(c.cid)">登録</button>
+              <button v-if="canRegister" :disabled="locked" @click="register(c.cid)">登録</button>
             </li>
           </ul>
-          <input v-model="query" type="search" placeholder="カード名・IDで検索" spellcheck="false" />
-          <ul v-if="found.length" class="cands">
+          <input v-if="canRegister" v-model="query" type="search" placeholder="カード名・IDで検索" spellcheck="false" />
+          <ul v-if="canRegister && found.length" class="cands">
             <li v-for="c in found" :key="c.cid">
               <span class="name" :title="c.name">{{ c.name }}</span>
               <span class="num">{{ c.cid }}</span>
@@ -989,10 +1016,15 @@ input[type="checkbox"] {
   border-radius: 2px;
   background: var(--border);
 }
-.item.pick {
+.review-body .note {
+  color: var(--muted);
+  font-size: 12px;
+  overflow-wrap: anywhere;
+}
+.item {
   cursor: pointer;
 }
-.item.pick:hover {
+.item:hover {
   background: var(--accent-soft);
 }
 .item.sel {

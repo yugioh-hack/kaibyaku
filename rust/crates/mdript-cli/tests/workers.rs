@@ -43,10 +43,12 @@ fn run(
     let mut summary: Value = serde_json::from_slice(&response.stdout).unwrap();
     summary.as_object_mut().unwrap().remove("seconds");
     for row in summary["results"].as_array_mut().unwrap() {
-        let saved = row["saved_path"].as_str().unwrap();
-        if !saved.is_empty() {
-            let relative = Path::new(saved).strip_prefix(output).unwrap();
-            row["saved_path"] = Value::String(relative.to_string_lossy().into_owned());
+        for key in ["saved_path", "existing_path"] {
+            let Some(path) = row[key].as_str().filter(|p| !p.is_empty()) else {
+                continue;
+            };
+            let relative = Path::new(path).strip_prefix(output).unwrap();
+            row[key] = Value::String(relative.to_string_lossy().into_owned());
         }
     }
     let mut images = BTreeMap::new();
