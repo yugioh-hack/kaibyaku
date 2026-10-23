@@ -1,5 +1,10 @@
 use serde_json::Value;
-use std::{collections::BTreeMap, fs, path::Path, process::Command};
+use std::{
+    collections::BTreeMap,
+    fs,
+    path::{Path, PathBuf},
+    process::Command,
+};
 
 fn files(root: &Path, dir: &Path, out: &mut BTreeMap<String, Vec<u8>>) {
     for entry in fs::read_dir(dir).unwrap() {
@@ -40,6 +45,10 @@ fn run(
         "{}",
         String::from_utf8_lossy(&response.stderr)
     );
+    // CLI は出力先を解決した形（短縮名を長い名前に直したもの）で返すので、比べる側も合わせる
+    let canonical = fs::canonicalize(output).unwrap();
+    let canonical = PathBuf::from(canonical.to_string_lossy().trim_start_matches(r"\\?\"));
+    let output = canonical.as_path();
     let mut summary: Value = serde_json::from_slice(&response.stdout).unwrap();
     summary.as_object_mut().unwrap().remove("seconds");
     for row in summary["results"].as_array_mut().unwrap() {
