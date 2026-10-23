@@ -1,4 +1,4 @@
-# マスターデュエル カード画像ツール（mdript）
+# 開闢（かいびゃく）― マスターデュエル カード画像ツール（mdript）
 
 遊戯王 マスターデュエルのスクリーンショットからカード画像を切り抜いてカード名で保存する Windows 向けの非公式ツールです。
 
@@ -6,11 +6,11 @@
 
 ## ダウンロード
 
-**[ダウンロード・リリース情報](https://github.com/yugioh-hack/mdript/releases)**
+**[新アプリ v2.0.0-beta.1 をダウンロード（Windows用zip）](https://github.com/yugioh-hack/mdript/releases/download/v2.0.0-beta.1/mdript-v2.0.0-beta.1-windows-x64.zip)**
+
+[ベータ版のリリース情報・SHA-256](https://github.com/yugioh-hack/mdript/releases/tag/v2.0.0-beta.1)
 
 新アプリは **v2.0.0-beta.1（ベータ版）** として公開しています。リリースの一覧で「Latest」になっている **v1.4.1 は旧アプリ** です。旧アプリを使う場合は、[旧アプリの使い方](https://github.com/yugioh-hack/mdript/blob/v1.4.1/README.md)を参照してください。
-
-![新アプリでスクリーンショット3枚を処理した結果。設定項目と、カード画像・名前を表示する結果一覧](docs/images/app-results.png)
 
 株式会社KONAMIおよび遊戯王公式とは関係ありません。
 
@@ -179,7 +179,7 @@ cd gui
 npm run build
 ```
 
-GitHub Actions（`.github/workflows/build.yml`）は、上の検証コマンドとリリースexeのビルド、配布物の作成を行い、公開はせずartifactとして保存します。`v*` のタグでは、タグが製品バージョン（`tauri.conf.json`・Cargo・npm）と一致し、v2以降であることも確かめます。旧Python版はこのワークフローでは配布しません。公開前の評価と残っている課題は [リリース品質確認](docs/release-readiness-2026-10-23.md) を参照してください。
+GitHub Actions（`.github/workflows/build.yml`）は、上の検証コマンドとリリースexeのビルド、配布物の作成を行い、公開はせずartifactとして保存します。`v*` のタグでは、タグが製品バージョン（`tauri.conf.json`・Cargo・npm）と一致し、v2以降であることも確かめます。旧Python版はこのワークフローでは配布しません。公開前の評価と残っている課題は [リリース品質確認](https://github.com/yugioh-hack/mdript/blob/claude/tauri-ui/docs/release-readiness-2026-10-23.md) を参照してください。
 
 ### Rust CLI
 

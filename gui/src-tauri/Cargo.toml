@@ -1,7 +1,7 @@
 [package]
 name = "mdript-gui"
 version = "2.0.0-beta.1"
-description = "MasterDuel切り抜きツール"
+description = "開闢 - マスターデュエル カード画像ツール"
 edition = "2024"
 license = "MIT"
 

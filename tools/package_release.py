@@ -20,7 +20,7 @@ import third_party_notices
 ROOT = Path(__file__).resolve().parent.parent
 EXE = ROOT / "gui/src-tauri/target/release/mdript.exe"
 
-README = r"""マスターデュエル カード画像ツール（mdript） {version}
+README = r"""開闢（かいびゃく）― マスターデュエル カード画像ツール（mdript） {version}
 
 遊戯王 マスターデュエルのスクリーンショットからカード画像を切り抜いて、カード名で保存する Windows 向けの非公式ツールです。
 株式会社KONAMIおよび遊戯王公式とは関係ありません。
