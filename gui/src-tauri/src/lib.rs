@@ -524,7 +524,7 @@ pub fn run() {
             // アプリ名の右に版番号を出す
             if let Some(window) = app.get_webview_window("main") {
                 let title = format!(
-                    "開闢 v{} - マスターデュエル カード画像ツール",
+                    "開闢 v{} - MDカード画像ツール",
                     env!("CARGO_PKG_VERSION")
                 );
                 let _ = window.set_title(&title);
