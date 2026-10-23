@@ -520,6 +520,17 @@ pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
         .manage(Arc::new(Busy::default()))
+        .setup(|app| {
+            // アプリ名の右に版番号を出す
+            if let Some(window) = app.get_webview_window("main") {
+                let title = format!(
+                    "開闢 v{} - マスターデュエル カード画像ツール",
+                    env!("CARGO_PKG_VERSION")
+                );
+                let _ = window.set_title(&title);
+            }
+            Ok(())
+        })
         .invoke_handler(tauri::generate_handler![
             get_state,
             save_config,

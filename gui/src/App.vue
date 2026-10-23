@@ -18,17 +18,16 @@ import type {
   UpdateDone,
 } from "./types";
 
-const RESOLUTIONS: Record<string, string> = {
-  自動: "auto",
-  "FullHD (1920x1080)": "1920x1080",
-  "WQHD (2560x1440)": "2560x1440",
-  "4K (3840x2160)": "3840x2160",
-};
-const FORMATS = ["webp", "png", "both"];
+// 保存形式（画面の表示と、設定・処理に渡す値）
+const FORMATS = [
+  { label: "webp", value: "webp" },
+  { label: "png", value: "png" },
+  { label: "両方", value: "both" },
+];
 const ENGLISH: Record<string, string> = {
   英語名で保存: "name",
   日本語名で保存: "ja",
-  判別しない: "off",
+  区別しない: "off",
 };
 const SPLIT: Record<string, string> = {
   分けない: "none",
@@ -42,7 +41,6 @@ const labelOf = (table: Record<string, string>, value: string | undefined, fallb
 
 // ---- 設定 ----
 const output = ref("");
-const resolution = ref("自動");
 const format = ref("webp");
 const rounded = ref(true);
 const recursive = ref(true);
@@ -72,7 +70,6 @@ const namesText = computed(() => (data.value.names > 0 ? `カード名 ${data.va
 function currentConfig(): Config {
   return {
     output_dir: output.value.trim(),
-    resolution: resolution.value,
     save_format: format.value,
     rounded: rounded.value,
     recursive: recursive.value,
@@ -329,7 +326,8 @@ function identifyArgs(out: string): ProcessArgs {
     save_not_card: saveNotCard.value,
     english: ENGLISH[english.value] ?? "name",
     split: SPLIT[split.value] ?? "none",
-    resolution: RESOLUTIONS[resolution.value] ?? "auto",
+    // カードの位置は自動で見つける（解像度を指定しても、見つけられる範囲は広がらない）
+    resolution: "auto",
   };
 }
 
@@ -502,7 +500,6 @@ async function reportMigration(m: Migration) {
 }
 
 // ---- 表示 ----
-const distanceText = (r: IdentifyResult) => (r.distance < 999 ? String(r.distance) : "-");
 const fileName = (path: string) => path.split(/[\\/]/).pop() ?? path;
 
 const unlisten: Array<() => void> = [];
@@ -525,8 +522,7 @@ onMounted(async () => {
   config = state.config;
   data.value = state.data;
   output.value = config.output_dir || state.default_output;
-  resolution.value = config.resolution && config.resolution in RESOLUTIONS ? config.resolution : "自動";
-  format.value = FORMATS.includes(config.save_format ?? "") ? config.save_format! : "webp";
+  format.value = FORMATS.some((f) => f.value === config.save_format) ? config.save_format! : "webp";
   rounded.value = config.rounded ?? true;
   recursive.value = config.recursive ?? true;
   skipDuplicate.value = config.skip_duplicate ?? true;
@@ -607,15 +603,9 @@ onBeforeUnmount(() => {
       </div>
       <div class="line options">
         <label class="field">
-          解像度
-          <select v-model="resolution">
-            <option v-for="label in Object.keys(RESOLUTIONS)" :key="label">{{ label }}</option>
-          </select>
-        </label>
-        <label class="field">
           形式
           <select v-model="format">
-            <option v-for="f in FORMATS" :key="f">{{ f }}</option>
+            <option v-for="f in FORMATS" :key="f.value" :value="f.value">{{ f.label }}</option>
           </select>
         </label>
         <label class="field">
@@ -665,7 +655,6 @@ onBeforeUnmount(() => {
           <span></span>
           <span>状態</span>
           <span>カード名</span>
-          <span class="num">距離</span>
           <span>元ファイル</span>
         </div>
         <div ref="listEl" class="list" @scroll="onListScroll">
@@ -693,7 +682,6 @@ onBeforeUnmount(() => {
               {{ r.name || "-" }}
               <em v-if="r.english" class="badge">英語版</em>
             </span>
-            <span class="num">{{ distanceText(r) }}</span>
             <span class="file" :title="r.source">
               {{ fileName(r.source) }}
               <small v-if="r.note">{{ r.note }}</small>
@@ -720,13 +708,12 @@ onBeforeUnmount(() => {
           <div class="now" :class="'s-' + STATUSES.indexOf(current.status)">
             <span class="state">{{ current.status }}</span>
             <span class="name">{{ current.name || "-" }}</span>
-            <span class="num">{{ distanceText(current) }}</span>
           </div>
           <div v-if="current.note" class="note">{{ current.note }}</div>
           <ul v-if="candidates.length" class="cands">
-            <li v-for="c in candidates" :key="c.cid">
+            <li v-for="(c, rank) in candidates" :key="c.cid">
               <span class="name" :title="c.name">{{ c.name }}</span>
-              <span class="num">{{ c.distance }}</span>
+              <span class="num">{{ rank + 1 }}位</span>
               <button v-if="canRegister" :disabled="locked" @click="register(c.cid)">登録</button>
             </li>
           </ul>
@@ -1027,7 +1014,7 @@ input[type="checkbox"] {
 }
 .row {
   display: grid;
-  grid-template-columns: 30px 4.8em minmax(0, 1.1fr) 3.5em minmax(0, 1.4fr);
+  grid-template-columns: 30px 4.8em minmax(0, 1.1fr) minmax(0, 1.4fr);
   gap: 10px;
   padding: 5px 12px;
   align-items: baseline;
