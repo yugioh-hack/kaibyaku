@@ -110,6 +110,7 @@ function flushRows() {
   nextTick(() => {
     const el = listEl.value;
     if (el) el.scrollTop = el.scrollHeight;
+    syncScroll();
   });
 }
 
@@ -142,6 +143,40 @@ const visible = computed(() => {
   });
   return out;
 });
+
+// 見えている行（と前後の数行）だけを描く。行の高さは CSS の .item と同じ 46px で固定
+const ROW_HEIGHT = 46;
+const OVERSCAN = 8;
+const scrollTop = ref(0);
+const viewHeight = ref(0);
+const windowStart = computed(() => Math.max(0, Math.floor(scrollTop.value / ROW_HEIGHT) - OVERSCAN));
+const windowRows = computed(() => {
+  const end = Math.ceil((scrollTop.value + viewHeight.value) / ROW_HEIGHT) + OVERSCAN;
+  return visible.value.slice(windowStart.value, end);
+});
+// スクロール位置は描画のたびに読み直す（requestAnimationFrame を待つと、窓が隠れている間や
+// 自動スクロールの直後に古い位置のまま描いて、一覧が空白に見える）
+function syncScroll() {
+  const el = listEl.value;
+  if (el) {
+    scrollTop.value = el.scrollTop;
+    viewHeight.value = el.clientHeight;
+  }
+}
+function onListScroll() {
+  syncScroll();
+}
+// 行数が変わると（追加・絞り込み）ブラウザーがスクロール位置を詰めることがあるので合わせ直す
+watch(
+  () => visible.value.length,
+  () => nextTick(syncScroll),
+);
+const listResize = new ResizeObserver(([entry]) => (viewHeight.value = entry.contentRect.height));
+watch(listEl, (el, old) => {
+  if (old) listResize.unobserve(old);
+  if (el) listResize.observe(el);
+});
+
 watch(
   () => counts.value[filter.value] === 0,
   (empty) => {
@@ -568,9 +603,11 @@ onBeforeUnmount(() => {
           <span class="num">距離</span>
           <span>元ファイル</span>
         </div>
-        <div ref="listEl" class="list">
+        <div ref="listEl" class="list" @scroll="onListScroll">
+          <div class="spacer" :style="{ height: visible.length * ROW_HEIGHT + 'px' }">
+          <div class="window" :style="{ transform: `translateY(${windowStart * ROW_HEIGHT}px)` }">
           <div
-            v-for="{ r, i } in visible"
+            v-for="{ r, i } in windowRows"
             :key="i"
             class="row item"
             :class="['s-' + STATUSES.indexOf(r.status), { pick: REVIEWABLE.includes(r.status), sel: selected === i }]"
@@ -589,6 +626,8 @@ onBeforeUnmount(() => {
               {{ fileName(r.source) }}
               <small v-if="r.note">{{ r.note }}</small>
             </span>
+          </div>
+          </div>
           </div>
         </div>
       </section>
@@ -925,11 +964,16 @@ input[type="checkbox"] {
   flex: 1;
   overflow-y: auto;
 }
+.spacer {
+  position: relative;
+}
+.window {
+  position: absolute;
+  inset: 0 0 auto 0;
+}
 .item {
   height: 46px;
   align-items: center;
-  content-visibility: auto;
-  contain-intrinsic-size: auto 46px;
   border-bottom: 1px solid color-mix(in srgb, var(--border) 50%, transparent);
 }
 .thumb {

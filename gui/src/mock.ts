@@ -102,10 +102,14 @@ function startIdentify(args: Record<string, unknown>) {
   }
   timers.push(
     window.setInterval(() => {
-      const result = makeResult(done);
-      counts[result.status]++;
-      done++;
-      emit("identify-progress", { done, total, result });
+      // ?batch=200 で1回に流す件数を増やす（大量の行の表示確認用）
+      const batch = Number(new URLSearchParams(location.search).get("batch") ?? 1);
+      for (let k = 0; k < batch && done < total; k++) {
+        const result = makeResult(done);
+        counts[result.status]++;
+        done++;
+        emit("identify-progress", { done, total, result });
+      }
       if (done >= total) finish?.(false);
     }, 50),
   );
