@@ -8,7 +8,7 @@
 
 **[ダウンロード・リリース情報](https://github.com/yugioh-hack/mdript/releases)**
 
-新アプリは公開準備中です。現在配布している **v1.4.1 は旧アプリ** です。旧アプリを使う場合は、[旧アプリの使い方](https://github.com/yugioh-hack/mdript/blob/v1.4.1/README.md)を参照してください。
+新アプリは **v2.0.0-beta.1（ベータ版）** として公開しています。リリースの一覧で「Latest」になっている **v1.4.1 は旧アプリ** です。旧アプリを使う場合は、[旧アプリの使い方](https://github.com/yugioh-hack/mdript/blob/v1.4.1/README.md)を参照してください。
 
 ![新アプリでスクリーンショット3枚を処理した結果。設定項目と、カード画像・名前を表示する結果一覧](docs/images/app-results.png)
 
@@ -35,7 +35,7 @@
 
 ### 2. 起動してカード名を取得する
 
-ダウンロードしたzipを展開し、`mdript.exe` をダブルクリックして起動します。公開状況は上の「ダウンロード」を確認してください。開発ツールを入れる必要はありません。
+ダウンロードしたzipを展開し、`mdript.exe` をダブルクリックして起動します。ベータ版は上の「ダウンロード」の v2.0.0-beta.1 にあります。開発ツールを入れる必要はありません。
 
 WebView2 Runtime が必要です。多くの環境では導入済みですが、起動しないときは Microsoft の [WebView2 のページ](https://developer.microsoft.com/microsoft-edge/webview2/)から Evergreen Standalone Installer を入手してください。exeにコード署名はないため、Windows の警告が出る場合があります。配布ページに添える `SHA256SUMS.txt` と照合できます。
 
