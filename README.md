@@ -6,9 +6,11 @@
 
 ## ダウンロード
 
-**[開闢 2.0.0 をダウンロード（Windows用zip）](https://github.com/yugioh-hack/mdript/releases/download/v2.0.0/mdript-v2.0.0-windows-x64.zip)**
+**[開闢 2.1.0 をダウンロード（Windows用zip）](https://github.com/yugioh-hack/mdript/releases/download/v2.1.0/mdript-v2.1.0-windows-x64.zip)**
 
-[リリース情報・SHA-256](https://github.com/yugioh-hack/mdript/releases/tag/v2.0.0)
+[リリース情報・SHA-256](https://github.com/yugioh-hack/mdript/releases/tag/v2.1.0)
+
+2.1.0では、英語名データの不足を検知して再取得を案内し、英語名の取得失敗で既存データが失われることを防ぎます。英語版が日本語名で保存される場合は「カードデータ更新」→「カード名を取得」を実行してください。
 
 Python版の **v1.4.1 は旧アプリ** です。旧アプリを使う場合は、[旧アプリの使い方](https://github.com/yugioh-hack/mdript/blob/v1.4.1/README.md)を参照してください。
 

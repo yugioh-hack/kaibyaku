@@ -107,13 +107,14 @@ fn filter_config(value: &Value) -> Map<String, Value> {
         "english",
         "split",
     ];
-    const BOOLS: [&str; 6] = [
+    const BOOLS: [&str; 7] = [
         "rounded",
         "recursive",
         "skip_duplicate",
         "save_review",
         "save_not_card",
         "asked_names",
+        "asked_english_names",
     ];
     let Some(object) = value.as_object() else {
         return Map::new();

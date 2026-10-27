@@ -263,15 +263,19 @@ fn fetch_card_names(fetch: &mut impl Fetch) -> Result<Map<String, Value>, String
     for row in ja {
         cards.insert(row.id, json!({"n":row.name,"r":row.ruby}));
     }
-    if let Ok(en) = fetch_name_list(fetch, "en") {
-        for row in en {
-            if let Some(card) = cards.get_mut(&row.id) {
-                if !row.name.is_empty() {
-                    card["e"] = json!(row.name);
-                }
-            } else {
-                cards.insert(row.id, json!({"n":row.name,"r":"","l":"en"}));
+    let en = fetch_name_list(fetch, "en").map_err(|error| {
+        format!("英語名を取得できませんでした。カード名は更新していません: {error}")
+    })?;
+    if en.is_empty() || en.iter().all(|row| row.name.is_empty()) {
+        return Err("英語名を1件も取得できませんでした。カード名は更新していません。時間をおいて再取得してください。".into());
+    }
+    for row in en {
+        if let Some(card) = cards.get_mut(&row.id) {
+            if !row.name.is_empty() {
+                card["e"] = json!(row.name);
             }
+        } else {
+            cards.insert(row.id, json!({"n":row.name,"r":"","l":"en"}));
         }
     }
     Ok(cards)
@@ -364,6 +368,22 @@ mod tests {
     }
 
     #[test]
+    fn english_fetch_failure_or_empty_response_is_not_a_successful_update() {
+        for english in [None, Some(Vec::new())] {
+            let mut pages = HashMap::from([(
+                "ja".into(),
+                include_bytes!("../tests/fixtures/names-ja.html").to_vec(),
+            )]);
+            if let Some(bytes) = english {
+                pages.insert("en".into(), bytes);
+            }
+            let error = fetch_card_names(&mut Fixture(pages)).unwrap_err();
+            assert!(error.contains("英語名"));
+            assert!(error.contains("更新していません"));
+        }
+    }
+
+    #[test]
     fn redirect_host_and_scheme_are_rejected() {
         let base = format!("{BASE}card_search.action");
         assert!(redirect_url(&base, "https://evil.example/path").is_err());
@@ -399,6 +419,9 @@ mod tests {
             json!({"format":1,"fetched":"2026-10-22 12:35","count":3})
         );
         assert_eq!(saved["cards"], Value::Object(cards));
+        let summary = crate::learn::data_summary(&user_dir);
+        assert_eq!(summary["names"], 3);
+        assert_eq!(summary["english_names"], 3);
         assert!(!user_dir.join("card_names.json.tmp").exists());
     }
 }
