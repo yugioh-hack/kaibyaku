@@ -4,6 +4,7 @@ export interface DataSummary {
   cards: number;
   hashes: number;
   names: number;
+  english_names: number;
   names_fetched: boolean;
 }
 
@@ -19,6 +20,7 @@ export interface Config {
   save_review?: boolean;
   save_not_card?: boolean;
   asked_names?: boolean;
+  asked_english_names?: boolean;
 }
 
 /** 旧アプリのデータの取り込み結果（取り込みをしたときだけ中身がある） */

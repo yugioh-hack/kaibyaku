@@ -52,7 +52,7 @@ const split = ref("分けない");
 let config: Config = {};
 
 // ---- 画面の状態 ----
-const data = ref<DataSummary>({ cards: 0, hashes: 0, names: 0, names_fetched: false });
+const data = ref<DataSummary>({ cards: 0, hashes: 0, names: 0, english_names: 0, names_fetched: false });
 const busy = ref<"identify" | "update" | null>(null);
 const updateOpen = ref(false);
 const updateProgress = ref("");
@@ -65,7 +65,7 @@ const listEl = ref<HTMLElement | null>(null);
 
 const percent = computed(() => (total.value ? (done.value / total.value) * 100 : 0));
 const dataText = computed(() => `カード ${data.value.cards} 種 / ハッシュ ${data.value.hashes} 件`);
-const namesText = computed(() => (data.value.names > 0 ? `カード名 ${data.value.names} 件` : "カード名 未取得"));
+const namesText = computed(() => (data.value.names > 0 ? `カード名 ${data.value.names} 件 / 英語名 ${data.value.english_names} 件` : "カード名 未取得"));
 
 function currentConfig(): Config {
   return {
@@ -434,6 +434,14 @@ async function openUpdate() {
 }
 
 async function offerFirstFetch() {
+  if (data.value.names > 0 && data.value.english_names === 0 && !config.asked_english_names && english.value === "英語名で保存") {
+    await saveConfig({ asked_english_names: true });
+    const yes = await ask(
+      "英語名のデータがありません。\n「英語名で保存」を選んでも、英語版は日本語名で保存されます。\n\n公式データベースから日本語名・英語名を再取得しますか？",
+    );
+    if (yes) await runUpdate(false);
+    return;
+  }
   if (data.value.names > 0 || config.asked_names) return;
   config.asked_names = true;
   await saveConfig({ asked_names: true });
@@ -757,7 +765,7 @@ onBeforeUnmount(() => {
           <div class="dialog-actions column">
             <div class="update-choice">
               <button aria-describedby="update-names-description" @click="runUpdate(false)">カード名を取得</button>
-              <p id="update-names-description">保存名に使うカード名を更新します。</p>
+              <p id="update-names-description">保存名に使う日本語名・英語名を更新します。</p>
             </div>
             <div class="update-choice">
               <button aria-describedby="update-cards-description" @click="runUpdate(true)">新しいカードセットを取り込む</button>
