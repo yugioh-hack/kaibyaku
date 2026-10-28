@@ -94,7 +94,19 @@ pub fn data_summary(user_dir: &Path) -> Value {
         .and_then(|n| n["meta"]["fetched"].as_str())
         .unwrap_or("")
         .to_owned();
-    json!({"cards":cards,"hashes":hashes,"names":name_count,"names_fetched":fetched})
+    let english_names = names
+        .as_ref()
+        .and_then(|n| n["cards"].as_object())
+        .map_or(0, |cards| {
+            cards
+                .values()
+                .filter(|card| {
+                    card["e"].as_str().is_some_and(|s| !s.is_empty())
+                        || (card["l"] == "en" && card["n"].as_str().is_some_and(|s| !s.is_empty()))
+                })
+                .count()
+        });
+    json!({"cards":cards,"hashes":hashes,"names":name_count,"english_names":english_names,"names_fetched":fetched})
 }
 
 pub(crate) fn save_hashes(

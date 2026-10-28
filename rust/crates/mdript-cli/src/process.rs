@@ -1317,6 +1317,51 @@ mod tests {
         identify_paths(o, vec![input], &AtomicBool::new(false), &|_, _, _| {}).unwrap()
     }
     #[test]
+    fn mixed_languages_use_localized_names_in_webp_folders() {
+        let temp = Temp::new();
+        let input = temp.0.join("input");
+        fs::create_dir_all(&input).unwrap();
+        let mut card = RgbImage::from_fn(200, 300, |x, y| {
+            image::Rgb([
+                ((x * 17 + y * 3) % 256) as u8,
+                ((x * 7 + y * 19) % 256) as u8,
+                ((x * 11 + y * 13) % 256) as u8,
+            ])
+        });
+        let hash = mdript_core::artwork_hash(&card, [0, 0, 200, 300], false, false).unwrap();
+        for (language, vertical) in [("ja", false), ("en", true)] {
+            for y in 226..269 {
+                for x in 14..186 {
+                    let ink = if vertical { x % 8 < 2 } else { y % 8 < 2 };
+                    card.put_pixel(x, y, image::Rgb([if ink { 0 } else { 240 }; 3]));
+                }
+            }
+            card.save(input.join(format!("{language}.png"))).unwrap();
+        }
+        let mut o = options(&temp);
+        o.resolution = Resolution::Card;
+        o.format = "webp".into();
+        o.split = "both".into();
+        o.workers = 2;
+        fs::create_dir_all(&o.user_data).unwrap();
+        fs::write(
+            o.user_data.join("card_hashes_user.json"),
+            json!({"meta":{"format":2},"hashes":{"99999":[hash]}}).to_string(),
+        )
+        .unwrap();
+        fs::write(
+            o.user_data.join("card_names.json"),
+            json!({"cards":{"99999":{"n":"テストカード","e":"Test Card"}}}).to_string(),
+        )
+        .unwrap();
+        let summary = run_one(&o, input);
+        assert_eq!(summary["confirmed"], 2, "{summary}");
+        assert_eq!(summary["skipped"], 0);
+        assert!(o.output.join("ja/テストカード.webp").is_file());
+        assert!(o.output.join("en/Test Card.webp").is_file());
+    }
+
+    #[test]
     fn results_list_every_file_they_created() {
         let temp = Temp::new();
         let input = plain_input(&temp);
