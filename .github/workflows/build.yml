@@ -35,6 +35,9 @@ jobs:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
           persist-credentials: false
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+        with:
+          workspaces: rust
       - run: rustup component add rustfmt clippy
       - run: cargo fmt --manifest-path rust/Cargo.toml --all --check
       - run: cargo test --manifest-path rust/Cargo.toml --workspace --locked
@@ -54,6 +57,9 @@ jobs:
           node-version: "22"
           cache: npm
           cache-dependency-path: gui/package-lock.json
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+        with:
+          workspaces: gui/src-tauri
       - run: rustup component add rustfmt clippy
       - run: npm ci
       # vue-tsc による型検査と本番ビルド。Tauri 側のテストは dist/ が必要なので先に行う
@@ -77,6 +83,9 @@ jobs:
           node-version: "22"
           cache: npm
           cache-dependency-path: gui/package-lock.json
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+        with:
+          workspaces: gui/src-tauri
       # タグのときは製品バージョンと一致していなければ止める（v1.x など旧アプリの版番号も拒否）
       - name: 製品バージョンの確認
         env:
