@@ -178,7 +178,7 @@ fn learn(cid: &str, image: &Path, user_dir: &Path) -> Result<Value, String> {
     }
     let image = load_rgb(image)?;
     let found = identify_trusted(&image, &catalog).ok_or(
-        "カードの位置を決められませんでした（カードの拡大画面を全画面で撮った画像を使ってください）",
+        "カードの位置を決められませんでした（カードの拡大画面か詳細画面を全画面で撮った画像を使ってください）",
     )?;
     let current = format!(
         "{}（{}）  現在の照合: {}（{}）距離 {}",

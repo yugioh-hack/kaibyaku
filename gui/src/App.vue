@@ -34,6 +34,10 @@ const SPLIT: Record<string, string> = {
   "英語版を en に": "en",
   "ja と en に分ける": "both",
 };
+const DETAIL: Record<string, string> = {
+  "detail/ に分ける": "folder",
+  "名前に _detail を付ける": "suffix",
+};
 const STATUSES = ["確定", "要確認", "カードなし", "エラー"];
 
 const labelOf = (table: Record<string, string>, value: string | undefined, fallback: string) =>
@@ -49,6 +53,7 @@ const saveReview = ref(true);
 const saveNotCard = ref(true);
 const english = ref("英語名で保存");
 const split = ref("分けない");
+const detail = ref("detail/ に分ける");
 let config: Config = {};
 
 // ---- 画面の状態 ----
@@ -78,6 +83,7 @@ function currentConfig(): Config {
     save_not_card: saveNotCard.value,
     english: ENGLISH[english.value] ?? "name",
     split: SPLIT[split.value] ?? "none",
+    detail: DETAIL[detail.value] ?? "folder",
   };
 }
 
@@ -340,6 +346,7 @@ function identifyArgs(out: string): ProcessArgs {
     save_not_card: saveNotCard.value,
     english: ENGLISH[english.value] ?? "name",
     split: SPLIT[split.value] ?? "none",
+    detail: DETAIL[detail.value] ?? "folder",
     // カードの位置は自動で見つける（解像度を指定しても、見つけられる範囲は広がらない）
     resolution: "auto",
   };
@@ -552,6 +559,7 @@ onMounted(async () => {
   saveNotCard.value = config.save_not_card ?? true;
   english.value = labelOf(ENGLISH, config.english, "英語名で保存");
   split.value = labelOf(SPLIT, config.split, "分けない");
+  detail.value = labelOf(DETAIL, config.detail, "detail/ に分ける");
   status.value = "画像かフォルダをここにドロップしてください";
   if (state.migration) await reportMigration(state.migration);
 
@@ -640,6 +648,12 @@ onBeforeUnmount(() => {
           言語でフォルダを
           <select v-model="split">
             <option v-for="label in Object.keys(SPLIT)" :key="label">{{ label }}</option>
+          </select>
+        </label>
+        <label class="field">
+          詳細画面
+          <select v-model="detail">
+            <option v-for="label in Object.keys(DETAIL)" :key="label">{{ label }}</option>
           </select>
         </label>
       </div>

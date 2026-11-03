@@ -1,4 +1,4 @@
-use crate::{Gray, language::gray, predict_card_box};
+use crate::{Gray, language::gray, predict_card_box, predict_detail_box};
 use image::RgbImage;
 pub const ASPECT: f64 = 894. / 1302.;
 fn round(v: f64) -> i64 {
@@ -146,18 +146,7 @@ pub fn trusted_boxes(im: &RgbImage, resolution: &Resolution) -> Vec<[i64; 4]> {
     match resolution {
         Resolution::Box(b) => vec![*b],
         Resolution::Card => vec![[0, 0, w as i64, h as i64]],
-        Resolution::Original(ow, oh) => {
-            let b = predict_card_box(*ow, *oh);
-            vec![
-                [
-                    (b[0] as f64 * w as f64 / (*ow as f64)) as i64,
-                    (b[1] as f64 * h as f64 / (*oh as f64)) as i64,
-                    (b[2] as f64 * w as f64 / (*ow as f64)) as i64,
-                    (b[3] as f64 * h as f64 / (*oh as f64)) as i64,
-                ],
-                predicted,
-            ]
-        }
+        Resolution::Original(..) => predicted_boxes(im, resolution),
         _ => {
             let mut out = vec![];
             if (w as f64 / h as f64 - ASPECT).abs() <= 0.08 {
@@ -166,6 +155,37 @@ pub fn trusted_boxes(im: &RgbImage, resolution: &Resolution) -> Vec<[i64; 4]> {
             out.push(predicted);
             out
         }
+    }
+}
+/// 拡大画面の予測位置（`Original` は元の大きさで計算した位置も）。
+pub fn predicted_boxes(im: &RgbImage, resolution: &Resolution) -> Vec<[i64; 4]> {
+    scaled_boxes(im, resolution, predict_card_box)
+}
+/// 詳細画面の予測位置。`Box`／`Card` は位置が決まっているので無い。
+pub fn detail_boxes(im: &RgbImage, resolution: &Resolution) -> Vec<[i64; 4]> {
+    scaled_boxes(im, resolution, predict_detail_box)
+}
+fn scaled_boxes(
+    im: &RgbImage,
+    resolution: &Resolution,
+    predict: fn(u32, u32) -> [i64; 4],
+) -> Vec<[i64; 4]> {
+    let (w, h) = im.dimensions();
+    match resolution {
+        Resolution::Box(_) | Resolution::Card => vec![],
+        Resolution::Original(ow, oh) => {
+            let b = predict(*ow, *oh);
+            vec![
+                [
+                    (b[0] as f64 * w as f64 / (*ow as f64)) as i64,
+                    (b[1] as f64 * h as f64 / (*oh as f64)) as i64,
+                    (b[2] as f64 * w as f64 / (*ow as f64)) as i64,
+                    (b[3] as f64 * h as f64 / (*oh as f64)) as i64,
+                ],
+                predict(w, h),
+            ]
+        }
+        _ => vec![predict(w, h)],
     }
 }
 pub fn nudged(b: [i64; 4], size: (u32, u32), shifts: &[f64], scales: &[f64]) -> Vec<[i64; 4]> {

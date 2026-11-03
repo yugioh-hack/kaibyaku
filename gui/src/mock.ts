@@ -58,6 +58,7 @@ function makeResult(i: number): IdentifyResult {
     name: none ? null : english ? "Blue-Eyes White Dragon" : SAMPLE_NAMES[i % 5],
     distance: none ? 999 : kind === "要確認" ? 14 : i % 6,
     margin: 5,
+    screen: none ? null : i % 4 === 2 ? "detail" : "maximized",
     saved_path: kind === "エラー" ? null : saved,
     saved_paths: kind === "エラー" ? [] : [saved],
     ranked:
@@ -200,6 +201,7 @@ export async function invoke(command: string, args: Record<string, unknown> = {}
           margin: 20,
           saved_path: saved,
           saved_paths: [saved],
+          screen: "maximized",
           ranked: [[0, "4003"]],
           note: "",
           english: false,

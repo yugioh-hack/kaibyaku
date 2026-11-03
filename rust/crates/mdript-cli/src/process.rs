@@ -2,7 +2,7 @@ use crate::paths::{is_within, resolved};
 use image::{ImageEncoder, RgbImage, RgbaImage};
 use mdript_core::{
     catalog::Catalog,
-    identify::identify,
+    identify::{Screen, identify},
     language::{frame_twin, stroke_ratio},
     layout::Resolution,
 };
@@ -37,6 +37,7 @@ pub struct Options {
     pub not_card: bool,
     pub english: String,
     pub split: String,
+    pub detail: String,
     pub resolution: Resolution,
     pub dry: bool,
     pub csv: bool,
@@ -57,6 +58,7 @@ impl Options {
             not_card: true,
             english: "name".into(),
             split: "none".into(),
+            detail: "folder".into(),
             resolution: Resolution::Auto,
             dry: false,
             csv: true,
@@ -138,6 +140,12 @@ fn parse(args: Vec<OsString>) -> Result<(Options, Vec<PathBuf>), String> {
                 o.split = take_value(&args, &mut i)?.to_string_lossy().into_owned();
                 if !["none", "en", "both"].contains(&o.split.as_str()) {
                     return Err("invalid --split".into());
+                }
+            }
+            "--detail" => {
+                o.detail = take_value(&args, &mut i)?.to_string_lossy().into_owned();
+                if !["folder", "suffix"].contains(&o.detail.as_str()) {
+                    return Err("invalid --detail".into());
                 }
             }
             "--resolution" => {
@@ -588,7 +596,7 @@ fn prepare(path: &Path, catalog: &Catalog, o: &Options) -> Result<Prepared, Stri
         panic!("injected prepare panic");
     }
     let im = load_image(path)?;
-    let mut result = json!({"source":path,"size":[im.width(),im.height()],"status":"カードなし","card_id":"","name":"","distance":999,"margin":0,"saved_path":"","note":"","english":false,"box":null,"origin":null,"hash":null,"ranked":[],"stroke_ratio":null});
+    let mut result = json!({"source":path,"size":[im.width(),im.height()],"status":"カードなし","card_id":"","name":"","distance":999,"margin":0,"saved_path":"","note":"","english":false,"screen":null,"box":null,"origin":null,"hash":null,"ranked":[],"stroke_ratio":null});
     let stem = path.file_stem().unwrap_or_default().to_string_lossy();
     let Some(found) = identify(&im, catalog, &o.resolution) else {
         result["note"] = json!("照合できる画像がありません");
@@ -619,7 +627,7 @@ fn prepare(path: &Path, catalog: &Catalog, o: &Options) -> Result<Prepared, Stri
     result["ranked"] = json!(found.ranked);
     let card = found.card(&im);
     if found.distance > 36 {
-        result["note"] = json!("カードの拡大画面ではないようです");
+        result["note"] = json!("カードの拡大画面か詳細画面ではないようです");
         if o.not_card {
             return Ok(Prepared {
                 result,
@@ -637,6 +645,7 @@ fn prepare(path: &Path, catalog: &Catalog, o: &Options) -> Result<Prepared, Stri
         }
         return Ok(Prepared::complete(result));
     }
+    result["screen"] = json!(found.screen.as_str());
     let cid = frame_twin(&card, &found.card_id);
     let japanese = catalog.display_name(&cid, false);
     let mut name = japanese.clone();
@@ -657,6 +666,10 @@ fn prepare(path: &Path, catalog: &Catalog, o: &Options) -> Result<Prepared, Stri
             name.push_str("_en");
         }
     }
+    let detail = found.screen == Screen::Detail;
+    if detail && o.detail == "suffix" {
+        name.push_str("_detail");
+    }
     let confirmed = found.confirmed();
     result["status"] = json!(if confirmed { "確定" } else { "要確認" });
     result["card_id"] = json!(cid);
@@ -666,11 +679,12 @@ fn prepare(path: &Path, catalog: &Catalog, o: &Options) -> Result<Prepared, Stri
         result["note"] = json!("要確認のため保存しませんでした");
         return Ok(Prepared::complete(result));
     }
-    let mut target = if confirmed {
-        o.output.clone()
+    let root = if detail && o.detail == "folder" {
+        o.output.join("detail")
     } else {
-        o.output.join("review")
+        o.output.clone()
     };
+    let mut target = if confirmed { root } else { root.join("review") };
     if o.english != "off" {
         if english && ["en", "both"].contains(&o.split.as_str()) {
             target.push("en");
@@ -847,7 +861,7 @@ fn error_result(path: &Path, error: String) -> Value {
 pub fn run(args: Vec<OsString>) -> Result<(), String> {
     if args.len() == 1 && args[0] == "--help" {
         println!(
-            "mdript-cli identify PATH... --output ABS_DIR --user-data ABS_DIR [--format webp|png|both] [--quality 1..100] [--resolution auto|fixed|WxH] [--card|--box L T R B] [--english name|ja|off] [--split none|en|both] [--workers 1..256] [--dry-run] [--no-csv] [--keep-duplicates] [--no-rounded] [--no-recursive] [--no-review] [--no-not-card]\nUser data is optional read-only copied card_names.json/card_hashes_user.json. No implicit APPDATA access. JSON summary on stdout; errors exit 1."
+            "mdript-cli identify PATH... --output ABS_DIR --user-data ABS_DIR [--format webp|png|both] [--quality 1..100] [--resolution auto|fixed|WxH] [--card|--box L T R B] [--english name|ja|off] [--split none|en|both] [--detail folder|suffix] [--workers 1..256] [--dry-run] [--no-csv] [--keep-duplicates] [--no-rounded] [--no-recursive] [--no-review] [--no-not-card]\nUser data is optional read-only copied card_names.json/card_hashes_user.json. No implicit APPDATA access. JSON summary on stdout; errors exit 1."
         );
         return Ok(());
     }
@@ -999,6 +1013,7 @@ mod tests {
             not_card: true,
             english: "name".into(),
             split: "none".into(),
+            detail: "folder".into(),
             resolution: Resolution::Auto,
             dry: false,
             csv: true,
@@ -1461,6 +1476,212 @@ mod tests {
         assert_eq!(summary["error"], 0);
         assert!(summary["csv_error"]["path"].is_string());
         assert!(Path::new(summary["results"][0]["saved_path"].as_str().unwrap()).is_file());
+    }
+    const SIZE: (u32, u32) = (640, 360);
+    /// 枠と模様のあるカードを `b` に描く。`english` なら名前欄を縦縞（英語版）にする。
+    fn draw_card(im: &mut RgbImage, b: [i64; 4], seed: u32, english: bool) {
+        let [l, t, r, bt] = b;
+        let (w, h) = ((r - l) as f64, (bt - t) as f64);
+        for y in t..bt {
+            for x in l..r {
+                let (u, v) = ((x - l) as f64 / w, (y - t) as f64 / h);
+                let border = u < 0.04 || u > 0.96 || v < 0.03 || v > 0.97;
+                let mut cell = ((u * 16.) as u32 * 31 + (v * 24.) as u32 * 17) ^ (seed << 12);
+                cell = cell.wrapping_mul(2654435761);
+                cell = (cell ^ (cell >> 15)).wrapping_mul(2246822519);
+                let mut value = (cell >> 24) as u8;
+                if (0.76..0.89).contains(&v) && (0.08..0.92).contains(&u) {
+                    let n = (if english { x - l } else { y - t }) % 8;
+                    value = if n < 2 { 0 } else { 240 };
+                }
+                let value = if border { 250 } else { value };
+                im.put_pixel(x as u32, y as u32, image::Rgb([value; 3]));
+            }
+        }
+    }
+    fn card_hash(seed: u32, b: [i64; 4]) -> String {
+        let mut im = RgbImage::new(SIZE.0, SIZE.1);
+        draw_card(&mut im, b, seed, false);
+        mdript_core::artwork_hash(&im, b, false, false).unwrap()
+    }
+    /// 見た目が違う 2 枚のカード（9001、9002）の照合データと名前を用意する。
+    /// 9002 のハッシュは 34 ビット崩してあり、確定しない（要確認）距離になる。
+    fn detail_options(temp: &Temp) -> Options {
+        let o = options(temp);
+        let detail = mdript_core::predict_detail_box(SIZE.0, SIZE.1);
+        let h1 = card_hash(5, detail);
+        let h2 = u128::from_str_radix(&card_hash(77, detail), 16).unwrap() ^ ((1u128 << 34) - 1);
+        fs::create_dir_all(&o.user_data).unwrap();
+        fs::write(
+            o.user_data.join("card_hashes_user.json"),
+            json!({"meta":{"format":2},"hashes":{"9001":[h1],"9002":[format!("{h2:032x}")]}})
+                .to_string(),
+        )
+        .unwrap();
+        fs::write(
+            o.user_data.join("card_names.json"),
+            json!({"cards":{"9001":{"n":"テストカード","e":"Test Card"},"9002":{"n":"確認カード","e":"Check Card"}}}).to_string(),
+        )
+        .unwrap();
+        o
+    }
+    fn screenshot(
+        input: &Path,
+        file: &str,
+        box_of: fn(u32, u32) -> [i64; 4],
+        seed: u32,
+        english: bool,
+    ) {
+        let mut im = RgbImage::new(SIZE.0, SIZE.1);
+        draw_card(&mut im, box_of(SIZE.0, SIZE.1), seed, english);
+        im.save(input.join(file)).unwrap();
+    }
+    fn names_in(dir: &Path) -> Vec<String> {
+        let mut names: Vec<_> = fs::read_dir(dir)
+            .map(|d| {
+                d.filter_map(Result::ok)
+                    .filter(|e| e.path().is_file())
+                    .map(|e| e.file_name().to_string_lossy().into_owned())
+                    .collect()
+            })
+            .unwrap_or_default();
+        names.sort();
+        names
+    }
+    fn detail_input(temp: &Temp) -> PathBuf {
+        let input = temp.0.join("input");
+        fs::create_dir_all(&input).unwrap();
+        let detail = mdript_core::predict_detail_box;
+        screenshot(&input, "a_ja.png", detail, 5, false);
+        screenshot(&input, "b_en.png", detail, 5, true);
+        screenshot(&input, "c_review.png", detail, 77, false);
+        RgbImage::from_pixel(SIZE.0, SIZE.1, image::Rgb([10, 20, 30]))
+            .save(input.join("d_none.png"))
+            .unwrap();
+        input
+    }
+    #[test]
+    fn detail_folder_option_keeps_the_usual_layout_under_detail() {
+        let temp = Temp::new();
+        let input = detail_input(&temp);
+        let mut o = detail_options(&temp);
+        o.split = "en".into();
+        let summary = run_one(&o, input);
+        let screens: Vec<_> = summary["results"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|r| r["screen"].clone())
+            .collect();
+        assert_eq!(
+            screens,
+            [
+                json!("detail"),
+                json!("detail"),
+                json!("detail"),
+                Value::Null
+            ],
+            "{summary}"
+        );
+        assert_eq!(names_in(&o.output.join("detail")), ["テストカード.png"]);
+        assert_eq!(names_in(&o.output.join("detail/en")), ["Test Card.png"]);
+        assert_eq!(
+            names_in(&o.output.join("detail/review")),
+            ["確認カード.png"]
+        );
+        assert_eq!(names_in(&o.output.join("not_card")), ["d_none.png"]);
+        assert_eq!(names_in(&o.output), ["log.csv"]);
+    }
+    #[test]
+    fn detail_suffix_option_goes_after_the_language_suffix() {
+        let temp = Temp::new();
+        let input = detail_input(&temp);
+        let mut o = detail_options(&temp);
+        o.detail = "suffix".into();
+        o.english = "ja".into();
+        let summary = run_one(&o, input);
+        assert_eq!(summary["confirmed"], 2, "{summary}");
+        assert_eq!(
+            names_in(&o.output),
+            [
+                "log.csv",
+                "テストカード_detail.png",
+                "テストカード_en_detail.png"
+            ]
+        );
+        assert_eq!(
+            names_in(&o.output.join("review")),
+            ["確認カード_detail.png"]
+        );
+        assert_eq!(names_in(&o.output.join("not_card")), ["d_none.png"]);
+        assert!(!o.output.join("detail").exists());
+    }
+    #[test]
+    fn maximized_and_detail_of_the_same_card_do_not_skip_each_other() {
+        for detail in ["folder", "suffix"] {
+            let temp = Temp::new();
+            let input = temp.0.join("input");
+            fs::create_dir_all(&input).unwrap();
+            screenshot(&input, "a_max.png", mdript_core::predict_card_box, 5, false);
+            screenshot(
+                &input,
+                "b_detail.png",
+                mdript_core::predict_detail_box,
+                5,
+                false,
+            );
+            let mut o = detail_options(&temp);
+            o.duplicates = true;
+            o.detail = detail.into();
+            // 拡大画面の位置のハッシュも同じカードとして登録する
+            let h = card_hash(5, mdript_core::predict_card_box(SIZE.0, SIZE.1));
+            let path = o.user_data.join("card_hashes_user.json");
+            let mut user: Value =
+                serde_json::from_str(&fs::read_to_string(&path).unwrap()).unwrap();
+            user["hashes"]["9001"]
+                .as_array_mut()
+                .unwrap()
+                .push(json!(h));
+            fs::write(&path, user.to_string()).unwrap();
+            let summary = run_one(&o, input);
+            assert_eq!(summary["confirmed"], 2, "{detail}: {summary}");
+            assert_eq!(summary["skipped"], 0, "{detail}: {summary}");
+            let screens: Vec<_> = summary["results"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .map(|r| r["screen"].as_str().unwrap().to_owned())
+                .collect();
+            assert_eq!(screens, ["maximized", "detail"], "{detail}");
+            if detail == "folder" {
+                assert_eq!(names_in(&o.output), ["log.csv", "テストカード.png"]);
+                assert_eq!(names_in(&o.output.join("detail")), ["テストカード.png"]);
+            } else {
+                assert_eq!(
+                    names_in(&o.output),
+                    ["log.csv", "テストカード.png", "テストカード_detail.png"]
+                );
+            }
+        }
+    }
+    #[test]
+    fn detail_option_is_validated() {
+        let temp = Temp::new();
+        let o = options(&temp);
+        let args = |value: &str| {
+            vec![
+                OsString::from("image.png"),
+                OsString::from("--output"),
+                o.output.clone().into_os_string(),
+                OsString::from("--user-data"),
+                o.user_data.clone().into_os_string(),
+                OsString::from("--detail"),
+                OsString::from(value),
+            ]
+        };
+        assert_eq!(parse(args("suffix")).unwrap().0.detail, "suffix");
+        assert_eq!(parse(args("folder")).unwrap().0.detail, "folder");
+        assert!(parse(args("off")).is_err());
     }
     #[test]
     fn rounded_mask_matches_pillow_fixture() {

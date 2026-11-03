@@ -100,12 +100,13 @@ fn default_output() -> String {
 
 /// Python 版 catalog.load_config と同じく、既知の項目を正しい型のときだけ残す。
 fn filter_config(value: &Value) -> Map<String, Value> {
-    const STRINGS: [&str; 5] = [
+    const STRINGS: [&str; 6] = [
         "output_dir",
         "resolution",
         "save_format",
         "english",
         "split",
+        "detail",
     ];
     const BOOLS: [&str; 7] = [
         "rounded",
@@ -198,6 +199,7 @@ struct IdentifyArgs {
     save_not_card: bool,
     english: String,
     split: String,
+    detail: String,
     /// "auto" または "1920x1080" のような元の解像度
     resolution: String,
 }
@@ -207,6 +209,7 @@ fn options(args: &IdentifyArgs, user_data: PathBuf) -> Result<process::Options, 
     if !["webp", "png", "both"].contains(&args.save_format.as_str())
         || !["name", "ja", "off"].contains(&args.english.as_str())
         || !["none", "en", "both"].contains(&args.split.as_str())
+        || !["folder", "suffix"].contains(&args.detail.as_str())
     {
         return Err("設定の値が正しくありません".into());
     }
@@ -218,6 +221,7 @@ fn options(args: &IdentifyArgs, user_data: PathBuf) -> Result<process::Options, 
     o.not_card = args.save_not_card;
     o.english = args.english.clone();
     o.split = args.split.clone();
+    o.detail = args.detail.clone();
     o.resolution = match args.resolution.split_once('x') {
         Some((w, h)) => {
             let w: u32 = w.parse().map_err(|_| "解像度の値が正しくありません")?;
@@ -600,6 +604,7 @@ mod tests {
             save_not_card: true,
             english: "ja".into(),
             split: "both".into(),
+            detail: "suffix".into(),
             resolution: resolution.into(),
         };
         let out = root.join("out").to_string_lossy().into_owned();
@@ -607,6 +612,7 @@ mod tests {
         assert_eq!(o.format, "png");
         assert!(!o.rounded && !o.recursive && !o.duplicates && !o.review && o.not_card);
         assert_eq!((o.english.as_str(), o.split.as_str()), ("ja", "both"));
+        assert_eq!(o.detail, "suffix");
         assert_eq!(
             o.resolution,
             mdript_core::layout::Resolution::Original(1920, 1080)
