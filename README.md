@@ -10,9 +10,11 @@
 
 ## ダウンロード
 
-**[開闢 2.1.1 をダウンロード（Windows用zip）](https://github.com/yugioh-hack/kaibyaku/releases/download/v2.1.1/mdript-v2.1.1-windows-x64.zip)**
+**[開闢 2.2.0 をダウンロード（Windows用zip）](https://github.com/yugioh-hack/kaibyaku/releases/download/v2.2.0/mdript-v2.2.0-windows-x64.zip)**
 
-[リリース情報・SHA-256](https://github.com/yugioh-hack/kaibyaku/releases/tag/v2.1.1)
+[リリース情報・SHA-256](https://github.com/yugioh-hack/kaibyaku/releases/tag/v2.2.0)
+
+2.2.0では、デッキ編集などで開くカード詳細画面のスクリーンショットからも切り抜けるようになりました。詳細画面のカードは既定で `detail/` に保存します。
 
 2.1.0では、英語名データの不足を検知して再取得を案内し、英語名の取得失敗で既存データが失われることを防ぎます。英語版が日本語名で保存される場合は「カードデータ更新」→「カード名を取得」を実行してください。
 
