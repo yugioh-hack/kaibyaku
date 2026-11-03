@@ -28,7 +28,7 @@ Python版（v1.x）は旧アプリです。このツールは旧アプリとは�
 
 ■ 起動
 mdript.exe をダブルクリックします。インストーラはありません。好きなフォルダに置いて使えます。
-使い方は https://github.com/yugioh-hack/mdript の README を参照してください。
+使い方は https://github.com/yugioh-hack/kaibyaku の README を参照してください。
 
 ■ 動作環境
 64ビット版 Windows と、WebView2 Runtime が必要です。動作を確認した環境は Windows 11 のみです。
