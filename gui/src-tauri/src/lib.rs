@@ -371,7 +371,7 @@ fn learn_card(busy: State<'_, Arc<Busy>>, cid: String, source: String) -> Result
 
 /// 登録して確定した後に、その結果が review/ か not_card/ に作った古いコピーを消す。
 /// 渡されたファイルだけが対象（同じ名前の別形式は、別の入力から作られたものかもしれないので触れない）。
-/// 出力先の中の review・not_card フォルダにある webp/png だけを受け付け、1つでも違えば何も消さない。
+/// 出力先の中の review・not_card・detail/review フォルダにある webp/png だけを受け付け、1つでも違えば何も消さない。
 #[tauri::command(async)]
 fn remove_review_copy(paths: Vec<String>, output: String) -> Result<(), String> {
     let output = PathBuf::from(output.trim());
@@ -392,10 +392,14 @@ fn remove_review_copy(paths: Vec<String>, output: String) -> Result<(), String> 
         let in_review = file
             .parent()
             .and_then(|parent| parent.strip_prefix(&output).ok())
-            .and_then(|relative| relative.components().next())
-            .is_some_and(|first| {
-                let first = first.as_os_str();
-                first == "review" || first == "not_card"
+            .is_some_and(|relative| {
+                let mut parts = relative.components().map(|c| c.as_os_str());
+                match parts.next() {
+                    Some(first) if first == "review" || first == "not_card" => true,
+                    // 詳細画面の要確認は detail/review/ に保存される
+                    Some(first) if first == "detail" => parts.next() == Some("review".as_ref()),
+                    _ => false,
+                }
             });
         let extension = file
             .extension()
@@ -641,7 +645,9 @@ mod tests {
         let review = root.join("review");
         let not_card = root.join("not_card");
         let en = root.join("en");
-        for dir in [&review, &not_card, &en] {
+        let detail = root.join("detail");
+        let detail_review = detail.join("review");
+        for dir in [&review, &not_card, &en, &detail_review] {
             fs::create_dir_all(dir).unwrap();
         }
         let out = root.to_string_lossy().into_owned();
@@ -654,9 +660,15 @@ mod tests {
             review.join("e.txt"),
             review.join("Mr. X.webp"),
             review.join("Mr.webp"),
+            detail_review.join("f.webp"),
+            detail.join("g.webp"),
         ] {
             fs::write(path, b"x").unwrap();
         }
+        remove(&[detail_review.join("f.webp")], &out).unwrap();
+        assert!(!detail_review.join("f.webp").exists());
+        assert!(remove(&[detail.join("g.webp")], &out).is_err());
+        assert!(detail.join("g.webp").exists());
         remove(&[review.join("a.webp")], &out).unwrap();
         assert!(!review.join("a.webp").exists() && review.join("keep.webp").exists());
         remove(&[review.join("Mr. X.webp")], &out).unwrap();
