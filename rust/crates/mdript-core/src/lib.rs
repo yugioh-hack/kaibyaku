@@ -170,6 +170,15 @@ pub fn predict_card_box(w: u32, h: u32) -> [i64; 4] {
     [left, top, left + cw, top + 1302.0 * scale].map(|v| v.round_ties_even() as i64)
 }
 
+/// カード詳細画面（左のカード）の位置。拡大画面のちょうど 2/3 の大きさ。
+pub fn predict_detail_box(w: u32, h: u32) -> [i64; 4] {
+    let scale = h as f64 / 1440.0;
+    let cw = 596.0 * scale;
+    let left = w as f64 / 2.0 - 1105.0 * scale;
+    let top = 220.0 * scale;
+    [left, top, left + cw, top + 869.0 * scale].map(|v| v.round_ties_even() as i64)
+}
+
 /// Validates before cropping or allocating. Never writes user data.
 pub fn artwork_hash(
     rgb: &image::RgbImage,
@@ -226,6 +235,10 @@ mod tests {
     #[test]
     fn reference_box() {
         assert_eq!(predict_card_box(2560, 1440), [833, 69, 1727, 1371]);
+    }
+    #[test]
+    fn detail_box() {
+        assert_eq!(predict_detail_box(2560, 1440), [175, 220, 771, 1089]);
     }
     #[test]
     fn unsafe_boxes_are_errors() {

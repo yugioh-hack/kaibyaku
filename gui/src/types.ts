@@ -14,6 +14,7 @@ export interface Config {
   save_format?: string;
   english?: string;
   split?: string;
+  detail?: string;
   rounded?: boolean;
   recursive?: boolean;
   skip_duplicate?: boolean;
@@ -50,6 +51,7 @@ export interface ProcessArgs {
   save_not_card: boolean;
   english: string;
   split: string;
+  detail: string;
   resolution: string;
 }
 
@@ -76,6 +78,8 @@ export interface IdentifyResult {
   /** 元画像の大きさ [幅, 高さ] と、判定に使ったカードの枠 [左, 上, 右, 下] */
   size?: [number, number];
   box?: [number, number, number, number] | null;
+  /** カードが写っていた画面。カードが見つからなかったときは null */
+  screen?: "maximized" | "detail" | null;
   ranked?: Array<[number, string]>;
   note: string;
   english: boolean;
