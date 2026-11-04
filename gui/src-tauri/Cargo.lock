@@ -1856,7 +1856,7 @@ dependencies = [
 
 [[package]]
 name = "mdript-gui"
-version = "2.2.1"
+version = "2.2.2"
 dependencies = [
  "mdript-cli",
  "mdript-core",

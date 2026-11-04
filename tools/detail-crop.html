@@ -53,11 +53,11 @@
   </div>
   <label class="file-button">画像を追加<input id="files" type="file" accept="image/*" multiple></label>
   <div class="coordinates">
-    <label>left<input id="left" type="number" step="1" value="176"></label>
+    <label>left<input id="left" type="number" step="1" value="177"></label>
     <label>top<input id="top" type="number" step="1" value="222"></label>
     <label title="右端（含まない）">right<input id="right" type="number" step="1" value="772"></label>
     <label title="下端（含まない）">bottom<input id="bottom" type="number" step="1" value="1090"></label>
-    <output id="size">596 × 868</output>
+    <output id="size">595 × 868</output>
     <button id="reset">初期値</button>
   </div>
 </header>
@@ -79,7 +79,7 @@
   </section>
 </main>
 <footer>
-  <input id="copy-value" aria-label="切り抜き座標" readonly value="[176, 222, 772, 1090]">
+  <input id="copy-value" aria-label="切り抜き座標" readonly value="[177, 222, 772, 1090]">
   <button id="copy">コピー</button>
   <output id="message" role="status"></output>
 </footer>
@@ -89,7 +89,7 @@ const $ = id => document.getElementById(id);
 const names = ['left', 'top', 'right', 'bottom'];
 const labels = ['左', '上', '右', '下'];
 // 画面ごとの初期値（2560x1440）。Rust の predict_detail_box / predict_card_box と同じ。
-const initials = { detail: [176, 222, 772, 1090], maximized: [833, 69, 1727, 1371] };
+const initials = { detail: [177, 222, 772, 1090], maximized: [833, 69, 1727, 1371] };
 const references = {};
 for (const key in initials) references[key] = { box: [...initials[key]], width: 2560, height: 1440 };
 let mode = 'detail';
