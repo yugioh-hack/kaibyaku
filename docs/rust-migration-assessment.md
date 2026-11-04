@@ -51,13 +51,13 @@ UIも刷新するなら、Rust処理コア + TauriのWeb UIが有力。
 - `pipeline.py`: 最大8スレッド。WebPはquality=90、method=4、PNGはcompress_level=6。保存順、重複、予約・失敗時清掃も実装済み。
 - `layout.py`: 通常枠で確定しない場合は検出・位置の探索を行う。この経路は通常確定と分けて計測が必要。
 - `mdript.spec`: PyInstaller onefile構成。Python・NumPy・Tkを外せれば容量削減の余地はある。
-- 同梱ハッシュJSONは665,449 bytes。READMEのexe約31MB、約0.05秒/枚は既存の説明値で、今回の実測ではない。
+- 同梱ハッシュJSONは約0.7MB。READMEのexe約31MB、約0.05秒/枚は既存の説明値で、今回の実測ではない。
 
 ## 今回実行した計測
 
 `tools/migration_probe.py`、結果は `tools/migration_probe_result.json`。
 リポジトリのルートから、PillowとNumPyを導入したPythonで `python tools/migration_probe.py` を実行するとJSONを標準出力に表示する。
-Python 3.12.14 / Pillow 12.3.0 / NumPy 2.3.5、同梱15,069ハッシュ。
+Python 3.12.14 / Pillow 12.3.0 / NumPy 2.3.5、同梱15,000以上のハッシュ。
 固定seedの低解像度ノイズを拡大した合成画像を使用。各工程1回ウォームアップ後15回の中央値。
 ディスクI/Oを除く単一スレッドの工程別マイクロベンチマークであり、実カードの精度評価やアプリ全体のベンチマークではない。
 ユーザーデータの読書きと通信はしない。
