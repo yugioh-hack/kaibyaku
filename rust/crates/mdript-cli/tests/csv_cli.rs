@@ -54,7 +54,16 @@ fn default_csv_is_written_but_no_csv_and_dry_run_leave_no_log() {
     ));
     assert_eq!(csv.matches("\r\n").count(), 2);
     assert!(!csv.contains(r"\\?\"));
-    assert!(csv.contains(saved_path));
+    assert!(
+        csv.contains(
+            &Path::new(saved_path)
+                .strip_prefix(&normal)
+                .unwrap()
+                .to_string_lossy()
+                .replace('\\', "/")
+        )
+    );
+    assert!(!csv.contains(&base.to_string_lossy().to_string()));
 
     let disabled = base.join("disabled");
     let result = run(&input, &disabled, &user, &["--no-csv"]);

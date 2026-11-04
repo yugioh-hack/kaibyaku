@@ -52,6 +52,31 @@ fn text(value: &Value) -> String {
     }
 }
 
+fn output_file(output: &Path, value: &Value) -> String {
+    let Some(path) = value.as_str().filter(|s| !s.is_empty()) else {
+        return String::new();
+    };
+    // 結果のパスと出力先を同じ形式にそろえ、絶対パスはログに残さない。
+    let relative = crate::paths::resolved(output).and_then(|root| {
+        crate::paths::resolved(Path::new(path)).and_then(|file| {
+            file.strip_prefix(root)
+                .map(Path::to_path_buf)
+                .map_err(|e| e.to_string())
+        })
+    });
+    relative
+        .map(|p| p.to_string_lossy().replace('\\', "/"))
+        .unwrap_or_default()
+}
+
+fn input_file(value: &Value) -> String {
+    value
+        .as_str()
+        .and_then(|s| Path::new(s).file_name())
+        .map(|s| s.to_string_lossy().into_owned())
+        .unwrap_or_default()
+}
+
 pub fn write_csv(output: &Path, results: &[Value]) -> std::io::Result<()> {
     if results.is_empty() {
         return Ok(());
@@ -74,9 +99,9 @@ pub fn write_csv(output: &Path, results: &[Value]) -> std::io::Result<()> {
             text(&result["card_id"]),
             text(&result["distance"]),
             text(&result["margin"]),
-            text(&result["saved_path"]),
+            output_file(output, &result["saved_path"]),
             text(&result["note"]),
-            text(&result["source"]),
+            input_file(&result["source"]),
         ];
         bytes.extend_from_slice(row(&values).as_bytes());
     }
@@ -87,6 +112,20 @@ pub fn write_csv(output: &Path, results: &[Value]) -> std::io::Result<()> {
 mod tests {
     use super::*;
     use serde_json::json;
+
+    #[test]
+    fn csv_does_not_include_private_directories() {
+        let dir = std::env::temp_dir().join(format!("mdript-private-csv-{}", std::process::id()));
+        let result = json!({"saved_path":dir.join("detail/review/card.webp"),
+            "source":dir.join("private-photos/shot.png")});
+        write_csv(&dir, &[result]).unwrap();
+        let csv = fs::read_to_string(dir.join("log.csv")).unwrap();
+        assert!(csv.contains("detail/review/card.webp"));
+        assert!(csv.contains("shot.png"));
+        assert!(!csv.contains("private-photos"));
+        assert!(!csv.contains(&dir.to_string_lossy().to_string()));
+        fs::remove_dir_all(dir).unwrap();
+    }
 
     #[test]
     fn csv_appends_with_one_bom_header_and_escaped_cells() {
