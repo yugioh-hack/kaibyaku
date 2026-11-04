@@ -77,3 +77,18 @@ async function splitSetting() {
 
 
 test("言語を区別しない間は言語別フォルダを無効にする", splitSetting);
+
+async function lockedSettings() {
+  for (const locked of [false, true]) {
+    const html = await settings({ locked });
+    const fields = [...html.matchAll(/<(?:input|select)([^>]*)>/g)];
+    assert.equal(fields.length, 10);
+    assert.ok(fields.every((f) => f[1].includes("disabled") === locked));
+    const buttons = [...html.matchAll(/<button([^>]*)>([^<]*)<\/button>/g)];
+    assert.equal(buttons.find((b) => b[2] === "変更")[1].includes("disabled"), locked);
+    assert.equal(buttons.find((b) => b[2] === "開く")[1].includes("disabled"), false);
+  }
+}
+
+
+test("処理中は詳細画面を含む設定をロックし開く操作は残す", lockedSettings);

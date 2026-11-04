@@ -638,42 +638,42 @@ onBeforeUnmount(() => {
     <section class="panel">
       <div class="line">
         <span class="caption">出力先</span>
-        <input v-model="output" class="grow" spellcheck="false" />
-        <button @click="chooseOutput">変更</button>
+        <input :disabled="locked" v-model="output" class="grow" spellcheck="false" />
+        <button :disabled="locked" @click="chooseOutput">変更</button>
         <button @click="openOutput">開く</button>
       </div>
       <div class="line options">
         <label class="field">
           形式
-          <select v-model="format">
+          <select v-model="format" :disabled="locked">
             <option v-for="f in FORMATS" :key="f.value" :value="f.value">{{ f.label }}</option>
           </select>
         </label>
         <label class="field">
           英語版
-          <select v-model="english">
+          <select v-model="english" :disabled="locked">
             <option v-for="label in Object.keys(ENGLISH)" :key="label">{{ label }}</option>
           </select>
         </label>
         <label class="field">
           言語でフォルダを
-          <select v-model="split" :disabled="english === '区別しない'">
+          <select v-model="split" :disabled="locked || english === '区別しない'">
             <option v-for="label in Object.keys(SPLIT)" :key="label">{{ label }}</option>
           </select>
         </label>
         <label class="field">
           詳細画面
-          <select v-model="detail">
+          <select v-model="detail" :disabled="locked">
             <option v-for="label in Object.keys(DETAIL)" :key="label">{{ label }}</option>
           </select>
         </label>
       </div>
       <div class="line checks">
-        <label><input v-model="rounded" type="checkbox" />角丸・透過</label>
-        <label><input v-model="recursive" type="checkbox" />サブフォルダも処理</label>
-        <label><input v-model="skipDuplicate" type="checkbox" />同じイラストは保存しない</label>
-        <label><input v-model="saveReview" type="checkbox" />要確認も保存</label>
-        <label><input v-model="saveNotCard" type="checkbox" />判定できない画像も残す</label>
+        <label><input :disabled="locked" v-model="rounded" type="checkbox" />角丸・透過</label>
+        <label><input :disabled="locked" v-model="recursive" type="checkbox" />サブフォルダも処理</label>
+        <label><input :disabled="locked" v-model="skipDuplicate" type="checkbox" />同じイラストは保存しない</label>
+        <label><input :disabled="locked" v-model="saveReview" type="checkbox" />要確認も保存</label>
+        <label><input :disabled="locked" v-model="saveNotCard" type="checkbox" />判定できない画像も残す</label>
       </div>
     </section>
 
