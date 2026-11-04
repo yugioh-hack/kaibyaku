@@ -63,7 +63,14 @@
   section { margin-top: 40px; }
   h2 { margin: 0 0 8px; font-size: 1.2rem; }
   section p { margin: 0 0 16px; }
-  figure { margin: 0; }
+  figure {
+    margin: 0;
+    display: grid;
+    grid-template-columns: 3fr auto 1fr;
+    align-items: center;
+    gap: 12px;
+  }
+  figure[hidden] { display: none; }
   figure img {
     display: block;
     width: 100%;
@@ -72,11 +79,15 @@
     border-radius: 10px;
     background: var(--card);
   }
+  .arrow { color: var(--muted); font-size: 1.5rem; }
   footer { margin-top: 56px; text-align: center; color: var(--muted); font-size: .85rem; }
   footer a { color: inherit; }
   @media (max-width: 480px) {
     h1 { font-size: 2.4rem; }
     .button { width: 100%; padding: 16px 0; }
+    figure { grid-template-columns: 1fr; justify-items: center; }
+    figure img:last-child { width: 40%; }
+    .arrow { transform: rotate(90deg); }
   }
 </style>
 </head>
@@ -96,13 +107,21 @@
   <section>
     <h2>カード1枚だけを切り抜く</h2>
     <p>マスターデュエルの拡大画面を撮るだけで、カードのイラストを自動で切り抜き、カード名を付けて保存します。</p>
-    <figure><img src="images/zoom.png" alt="" onerror="this.closest('figure').hidden = true"></figure>
+    <figure>
+      <img src="images/zoom-screen.jpg" alt="" onerror="this.closest('figure').hidden = true">
+      <span class="arrow" aria-hidden="true">→</span>
+      <img src="images/zoom-card.png" alt="" onerror="this.closest('figure').hidden = true">
+    </figure>
   </section>
 
   <section>
     <h2>詳細画面にも対応</h2>
     <p>デッキ編集などで開くカード詳細画面からも切り抜けます。たくさん撮ったスクショは、フォルダごとドロップしてまとめて処理できます。</p>
-    <figure><img src="images/detail.png" alt="" onerror="this.closest('figure').hidden = true"></figure>
+    <figure>
+      <img src="images/detail-screen.jpg" alt="" onerror="this.closest('figure').hidden = true">
+      <span class="arrow" aria-hidden="true">→</span>
+      <img src="images/detail-card.png" alt="" onerror="this.closest('figure').hidden = true">
+    </figure>
   </section>
 
   <footer>
