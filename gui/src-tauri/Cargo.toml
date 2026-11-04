@@ -25,6 +25,13 @@ tauri-plugin-dialog = "2"
 serde = { version = "1", features = ["derive"] }
 serde_json = { version = "1", features = ["preserve_order"] }
 
+[[test]]
+name = "asset_scope"
+path = "tests/asset_scope.rs"
+
+[dev-dependencies]
+tauri = { version = "2", features = ["test"] }
+
 [profile.release]
 codegen-units = 1
 lto = true

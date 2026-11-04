@@ -2,7 +2,9 @@
 //!
 //! ユーザーデータは %APPDATA%\mdript-v2 に置く。旧アプリの %APPDATA%\mdript は、初回起動時に
 //! 読み取ってコピーするだけで、変更しない（migrate.rs）。
+mod image_scope;
 mod migrate;
+use image_scope::{allow_input_images, allow_output_images};
 
 use mdript_cli::{learn, process, updater, updater_hash};
 use serde::Deserialize;
@@ -242,7 +244,7 @@ fn options(args: &IdentifyArgs, user_data: PathBuf) -> Result<process::Options, 
     Ok(o)
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 fn start_identify(
     app: AppHandle,
     busy: State<'_, Arc<Busy>>,
@@ -251,21 +253,15 @@ fn start_identify(
 ) -> Result<(), String> {
     let o = options(&args, user_dir()?)?;
     let guard = Busy::begin(&busy)?;
-    // サムネイルと確認パネル用に、出力先と、今回入力した画像だけを画面から読めるようにする
+    let inputs = process::collect(paths.into_iter().map(PathBuf::from).collect(), &o)?;
     let scope = app.asset_protocol_scope();
-    let _ = scope.allow_directory(PathBuf::from(args.output.trim()), true);
-    for path in paths.iter().map(PathBuf::from) {
-        let _ = if path.is_dir() {
-            scope.allow_directory(&path, true)
-        } else {
-            scope.allow_file(&path)
-        };
-    }
+    let home = std::env::var_os("USERPROFILE").map(PathBuf::from);
+    allow_output_images(&scope, &o.output, home.as_deref())?;
+    allow_input_images(&scope, &inputs, home.as_deref())?;
     let busy = Arc::clone(&busy);
     thread::spawn(move || {
         // イベントを送った後に外れる（終了待ちは、結果の通知まで済んでから解ける）
         let _guard = guard;
-        let inputs = paths.into_iter().map(PathBuf::from).collect();
         let on_result = |done: usize, total: usize, result: &Value| {
             let _ = app.emit(
                 "identify-progress",
@@ -273,7 +269,7 @@ fn start_identify(
             );
         };
         let outcome = catch_unwind(AssertUnwindSafe(|| {
-            process::identify_paths(&o, inputs, &busy.cancel, &on_result)
+            process::identify_files(&o, inputs, &busy.cancel, &on_result)
         }))
         .unwrap_or_else(|_| Err("処理中に予期しないエラーが発生しました".into()));
         let payload = match outcome {
@@ -291,6 +287,7 @@ fn start_identify(
 /// 画像1枚だけを判定し直す（登録の後に使う）。画面の一覧はこの結果で置き換える。
 #[tauri::command(async)]
 fn identify_one(
+    app: AppHandle,
     busy: State<'_, Arc<Busy>>,
     path: String,
     args: IdentifyArgs,
@@ -298,8 +295,12 @@ fn identify_one(
     let mut o = options(&args, user_dir()?)?;
     o.workers = 1;
     let _guard = Busy::begin(&busy)?;
-    let summary =
-        process::identify_paths(&o, vec![PathBuf::from(path)], &busy.cancel, &|_, _, _| {})?;
+    let inputs = process::collect(vec![PathBuf::from(path)], &o)?;
+    let scope = app.asset_protocol_scope();
+    let home = std::env::var_os("USERPROFILE").map(PathBuf::from);
+    allow_output_images(&scope, &o.output, home.as_deref())?;
+    allow_input_images(&scope, &inputs, home.as_deref())?;
+    let summary = process::identify_files(&o, inputs, &busy.cancel, &|_, _, _| {})?;
     let Some(result) = summary["results"].get(0).cloned() else {
         return Err(if summary["cancelled"] == true {
             "中止しました".into()
@@ -841,7 +842,8 @@ mod tests {
 
     #[test]
     fn update_hint_follows_failure_ratio_and_pack_list() {
-        let mostly = json!({"new_cards":1,"refreshed":0,"failed":["1","2"],"pack_list_failed":false});
+        let mostly =
+            json!({"new_cards":1,"refreshed":0,"failed":["1","2"],"pack_list_failed":false});
         assert!(needs_update_hint(&mostly));
         let few = json!({"new_cards":9,"refreshed":0,"failed":["1"],"pack_list_failed":false});
         assert!(!needs_update_hint(&few));

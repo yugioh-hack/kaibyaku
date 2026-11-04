@@ -11,4 +11,4 @@ pub mod process;
 pub mod updater;
 pub mod updater_hash;
 
-pub use paths::validate_user_data;
+pub use paths::{is_within, resolved, validate_user_data};

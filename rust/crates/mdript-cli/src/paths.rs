@@ -1,7 +1,7 @@
 use std::path::{Component, Path, PathBuf};
 
 // Resolve existing ancestors, including junctions, before comparing paths.
-pub(crate) fn resolved(path: &Path) -> Result<PathBuf, String> {
+pub fn resolved(path: &Path) -> Result<PathBuf, String> {
     let absolute = std::path::absolute(path).map_err(|e| e.to_string())?;
     let mut out = PathBuf::new();
     for component in absolute.components() {
@@ -21,7 +21,7 @@ pub(crate) fn resolved(path: &Path) -> Result<PathBuf, String> {
     Ok(out)
 }
 
-pub(crate) fn is_within(path: &Path, base: &Path) -> bool {
+pub fn is_within(path: &Path, base: &Path) -> bool {
     let mut left = path.components();
     for right in base.components() {
         let Some(candidate) = left.next() else {

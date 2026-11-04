@@ -267,7 +267,8 @@ fn visit(path: &Path, o: &Options, out: &mut Vec<PathBuf>) {
     }
 }
 
-fn collect(paths: Vec<PathBuf>, o: &Options) -> Result<Vec<PathBuf>, String> {
+/// 今回処理する画像だけを集め、出力先と対象外の拡張子を除く。
+pub fn collect(paths: Vec<PathBuf>, o: &Options) -> Result<Vec<PathBuf>, String> {
     let mut out = vec![];
     for path in paths {
         let path = std::path::absolute(path).map_err(|e| e.to_string())?;
@@ -878,7 +879,16 @@ pub fn identify_paths(
     cancel: &AtomicBool,
     on_result: &(dyn Fn(usize, usize, &Value) + Sync),
 ) -> Result<Value, String> {
-    let paths = collect(inputs, o)?;
+    identify_files(o, collect(inputs, o)?, cancel, on_result)
+}
+
+/// 収集済みの画像一覧をそのまま処理する。フォルダの走査・再収集は行わない。
+pub fn identify_files(
+    o: &Options,
+    paths: Vec<PathBuf>,
+    cancel: &AtomicBool,
+    on_result: &(dyn Fn(usize, usize, &Value) + Sync),
+) -> Result<Value, String> {
     let started = Instant::now();
     let user = fs::read_to_string(o.user_data.join("card_hashes_user.json")).ok();
     let names = fs::read_to_string(o.user_data.join("card_names.json")).ok();
@@ -1361,6 +1371,21 @@ mod tests {
         assert_eq!(summary["skipped"], 0);
         assert!(o.output.join("ja/テストカード.webp").is_file());
         assert!(o.output.join("en/Test Card.webp").is_file());
+    }
+
+    #[test]
+    fn collected_files_are_processed_without_collecting_again() {
+        let temp = Temp::new();
+        let input = plain_input(&temp);
+        let mut o = options(&temp);
+        o.dry = true;
+        let files = collect(vec![input.clone()], &o).unwrap();
+        fs::copy(input.join("shot.png"), input.join("added.png")).unwrap();
+        let summary = identify_files(&o, files, &AtomicBool::new(false), &|_, _, _| {}).unwrap();
+        assert_eq!(summary["total"], 1);
+        let summary =
+            identify_files(&o, vec![input], &AtomicBool::new(false), &|_, _, _| {}).unwrap();
+        assert_eq!(summary["error"], 1);
     }
 
     #[test]
