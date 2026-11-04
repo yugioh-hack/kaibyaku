@@ -49,7 +49,7 @@ pub fn validate_user_data(path: &Path) -> Result<PathBuf, String> {
     if let Some(appdata) = std::env::var_os("APPDATA") {
         let live = resolved(&PathBuf::from(appdata).join("mdript"))?;
         if is_within(&normalized, &live) {
-            return Err("live APPDATA/mdript is not allowed".into());
+            return Err("旧アプリのデータフォルダは使えません".into());
         }
     }
     Ok(normalized)

@@ -23,7 +23,7 @@ fn write_commands_reject_live_user_data_aliases() {
             let error = String::from_utf8_lossy(&output.stderr);
             assert!(!output.status.success(), "{command}: {path:?}");
             assert!(
-                error.contains("live APPDATA/mdript is not allowed"),
+                error.contains("旧アプリのデータフォルダは使えません"),
                 "{command}: {error}"
             );
             assert!(!path.exists(), "{command}: {path:?}");

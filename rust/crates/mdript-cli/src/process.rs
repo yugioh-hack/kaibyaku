@@ -74,16 +74,26 @@ impl Options {
         }
         self.output = resolved(&self.output)?;
         self.user_data = resolved(&self.user_data)?;
+        if self.output.parent().is_none()
+            || std::env::var_os("USERPROFILE").is_some_and(|home| {
+                resolved(&PathBuf::from(home)).is_ok_and(|home| home == self.output)
+            })
+        {
+            return Err("ここには保存できません。専用のフォルダを選んでください".into());
+        }
         if self.output == self.user_data
             || self.output.starts_with(&self.user_data)
             || self.user_data.starts_with(&self.output)
         {
-            return Err("output and user-data must be separate directories".into());
+            return Err("ここには保存できません。専用のフォルダを選んでください".into());
         }
         if let Some(appdata) = std::env::var_os("APPDATA") {
             let live = resolved(&PathBuf::from(appdata).join("mdript"))?;
             if is_within(&self.output, &live) || is_within(&self.user_data, &live) {
-                return Err("prototype paths must be isolated from live APPDATA/mdript".into());
+                return Err(
+                    "旧アプリのデータと重なる場所は使えません。専用のフォルダを選んでください"
+                        .into(),
+                );
             }
         }
         Ok(())
@@ -450,7 +460,7 @@ impl Saver {
         o: &Options,
     ) -> Result<Choice, String> {
         if !resolved(target)?.starts_with(&o.output) {
-            return Err("output directory resolves outside isolated output root".into());
+            return Err("保存先が指定した出力先フォルダの外を指しています".into());
         }
         fs::create_dir_all(target).map_err(|e| e.to_string())?;
         let extensions = match o.format.as_str() {
@@ -940,7 +950,7 @@ pub fn identify_files(
             result.unwrap_or_else(|| {
                 error_result(
                     &paths[turn],
-                    "worker ended before producing a result".into(),
+                    "画像の処理が結果を返す前に終了しました".into(),
                 )
             })
         })
@@ -1177,6 +1187,22 @@ mod tests {
             r"C:\cards\one.webp"
         );
     }
+    #[test]
+    fn overlapping_and_root_outputs_explain_how_to_choose_a_folder() {
+        let temp = Temp::new();
+        let mut o = options(&temp);
+        o.output = temp.0.clone();
+        assert_eq!(
+            o.validate_paths().unwrap_err(),
+            "ここには保存できません。専用のフォルダを選んでください"
+        );
+        o.output = temp.0.ancestors().last().unwrap().to_path_buf();
+        assert_eq!(
+            o.validate_paths().unwrap_err(),
+            "ここには保存できません。専用のフォルダを選んでください"
+        );
+    }
+
     #[test]
     fn options_reject_unsafe_or_unknown() {
         let temp = Temp::new();

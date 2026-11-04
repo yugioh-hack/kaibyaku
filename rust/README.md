@@ -18,7 +18,7 @@ cargo build --release --manifest-path rust/Cargo.toml --locked --bin mdript-cli
 rust/target/release/mdript-cli.exe identify C:/images --output C:/tmp/mdript-rust-output --user-data C:/tmp/mdript-rust-user --format both
 ```
 
-`--output`と`--user-data`には**異なる絶対ディレクトリ**を指定します。後者は省略可能なコピー済み`card_names.json`と`card_hashes_user.json`の読み取り先で、存在しなくても動きます。普段の`%APPDATA%/mdript`は読み書きせず、その場所を指定しても拒否します。
+`--output`と`--user-data`には**互いに重ならない絶対ディレクトリ**を指定します。後者は省略可能なコピー済み`card_names.json`と`card_hashes_user.json`の読み取り先で、存在しなくても動きます。普段の`%APPDATA%/mdript`は読み書きせず、その場所を指定しても拒否します。
 
 画像1枚の照合用ハッシュは、隔離したユーザーデータへ追加できます:
 
