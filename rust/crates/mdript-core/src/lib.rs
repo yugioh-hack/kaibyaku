@@ -171,12 +171,13 @@ pub fn predict_card_box(w: u32, h: u32) -> [i64; 4] {
 }
 
 /// カード詳細画面（左のカード）の位置。拡大画面のちょうど 2/3 の大きさ。
+/// 背景の黒い縁が入らないよう、外枠の内側いっぱい（596x868）で切る。
 pub fn predict_detail_box(w: u32, h: u32) -> [i64; 4] {
     let scale = h as f64 / 1440.0;
     let cw = 596.0 * scale;
-    let left = w as f64 / 2.0 - 1105.0 * scale;
-    let top = 220.0 * scale;
-    [left, top, left + cw, top + 869.0 * scale].map(|v| v.round_ties_even() as i64)
+    let left = w as f64 / 2.0 - 1104.0 * scale;
+    let top = 222.0 * scale;
+    [left, top, left + cw, top + 868.0 * scale].map(|v| v.round_ties_even() as i64)
 }
 
 /// Validates before cropping or allocating. Never writes user data.
@@ -238,7 +239,7 @@ mod tests {
     }
     #[test]
     fn detail_box() {
-        assert_eq!(predict_detail_box(2560, 1440), [175, 220, 771, 1089]);
+        assert_eq!(predict_detail_box(2560, 1440), [176, 222, 772, 1090]);
     }
     #[test]
     fn unsafe_boxes_are_errors() {
