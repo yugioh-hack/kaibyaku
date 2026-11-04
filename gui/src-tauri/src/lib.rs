@@ -841,7 +841,8 @@ mod tests {
 
     #[test]
     fn update_hint_follows_failure_ratio_and_pack_list() {
-        let mostly = json!({"new_cards":1,"refreshed":0,"failed":["1","2"],"pack_list_failed":false});
+        let mostly =
+            json!({"new_cards":1,"refreshed":0,"failed":["1","2"],"pack_list_failed":false});
         assert!(needs_update_hint(&mostly));
         let few = json!({"new_cards":9,"refreshed":0,"failed":["1"],"pack_list_failed":false});
         assert!(!needs_update_hint(&few));
