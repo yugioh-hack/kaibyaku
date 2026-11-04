@@ -238,7 +238,7 @@ fn options(args: &IdentifyArgs, user_data: PathBuf) -> Result<process::Options, 
         return Err("出力先フォルダを指定してください。".into());
     }
     if !o.output.is_absolute() {
-        return Err("出力先フォルダは C:\\ から始まる場所を指定してください。".into());
+        return Err("フォルダの場所を、ドライブ名から指定してください".into());
     }
     o.validate_paths()?;
     Ok(o)
@@ -544,7 +544,7 @@ fn data_summary() -> Result<Value, String> {
 fn open_folder(path: String) -> Result<(), String> {
     let path = PathBuf::from(path.trim());
     if !path.is_absolute() {
-        return Err("出力先フォルダは C:\\ から始まる場所を指定してください。".into());
+        return Err("フォルダの場所を、ドライブ名から指定してください".into());
     }
     fs::create_dir_all(&path).map_err(|e| format!("出力先を開けませんでした。\n{e}"))?;
     std::process::Command::new("explorer.exe")
@@ -629,6 +629,28 @@ mod tests {
         // 保存先そのものを作れない場合も同じ
         assert!(write_config(&dir.join("missing").join("deeper"), &config).is_err());
         fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn relative_folder_error_does_not_require_the_c_drive() {
+        assert_eq!(
+            open_folder("relative".into()).unwrap_err(),
+            "フォルダの場所を、ドライブ名から指定してください"
+        );
+        let mut args: Value = json!({"output":"relative", "save_format":"webp", "rounded":true,
+            "recursive":true,"skip_duplicate":true,"save_review":true,"save_not_card":true,
+            "english":"off","split":"none","detail":"folder","resolution":"auto"});
+        let root = std::env::temp_dir().join("mdript-drive-test");
+        assert_eq!(
+            options(&serde_json::from_value(args.clone()).unwrap(), root.clone())
+                .err()
+                .unwrap(),
+            "フォルダの場所を、ドライブ名から指定してください"
+        );
+        if cfg!(windows) {
+            args["output"] = json!(r"D:\cards");
+            assert!(options(&serde_json::from_value(args).unwrap(), root).is_ok());
+        }
     }
 
     #[test]

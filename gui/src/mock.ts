@@ -78,7 +78,7 @@ function startIdentify(args: Record<string, unknown>) {
   if (busy) throw "いま処理中です。終わるまでお待ちください。";
   const output = String(args.args ? (args.args as Record<string, unknown>).output : "").trim();
   if (!output) throw "出力先フォルダを指定してください。";
-  if (!/^[A-Za-z]:\\/.test(output)) throw "出力先フォルダは C:\\ から始まる場所を指定してください。";
+  if (!/^[A-Za-z]:\\/.test(output)) throw "フォルダの場所を、ドライブ名から指定してください";
   busy = true;
   const total = Number(new URLSearchParams(location.search).get("n") ?? 35);
   const counts = { 確定: 0, 要確認: 0, カードなし: 0, エラー: 0 };
