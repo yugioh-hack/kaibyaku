@@ -46,7 +46,7 @@ rust/target/release/mdript-cli.exe update-hashes --user-data C:/tmp/mdript-rust-
 
 HTTPには`ureq 3.4.2`のRustls・gzip既定構成を使います。同期型で依存が比較的小さく、TLSのためのCMake・NASMを必要としません。公式ホストのHTTPS以外とその外へのリダイレクトを拒否し、展開後32MiBの応答上限、1要求ごと0.4秒以上の間隔、最大3回の再試行を設けています。取得が完了してから一時ファイルを置き換えるため、中断で一部だけのカード名を保存しません。
 
-既定はWebP品質90、角丸透過、再帰、重複スキップ、要確認・カードなしを保存、言語判別と日本語/英語名、`log.csv`への追記。ワーカー数の既定は`min(8, max(2, 論理CPU数))`で、`--workers 1..256`で指定できます。`--workers 1`は逐次処理です。`--format png|webp|both`、`--quality 1..100`、`--resolution auto|fixed|WxH`、`--english name|ja|off`、`--split none|en|both`、`--detail folder|suffix`（詳細画面のカードを`detail/`に分けるか、名前に`_detail`を付ける。既定は`folder`）、`--no-rounded`、`--no-recursive`、`--keep-duplicates`、`--no-review`、`--no-not-card`、`--no-csv`を使用できます。`--card`は画像全体をカードとして、`--box L T R B`は明示した枠を使います。`--dry-run`は判定だけ行い、出力ディレクトリ・画像・CSVを作りません。
+既定はWebP品質90、角丸透過、再帰、重複スキップ、要確認・カードなしを保存、言語判別と日本語/英語名、`log.csv`への追記。拡大画面・詳細画面とも、枠が見つからない画像は保存せず、枠が見つかって照合できない場合だけ切り抜きを保存します。ワーカー数の既定は`min(8, max(2, 論理CPU数))`で、`--workers 1..256`で指定できます。`--workers 1`は逐次処理です。`--format png|webp|both`、`--quality 1..100`、`--resolution auto|fixed|WxH`、`--english name|ja|off`、`--split none|en|both`、`--detail folder|suffix`（詳細画面のカードを`detail/`に分けるか、名前に`_detail`を付ける。既定は`folder`）、`--no-rounded`、`--no-recursive`、`--keep-duplicates`、`--no-review`、`--no-not-card`、`--no-csv`を使用できます。`--card`は画像全体をカードとして、`--box L T R B`は明示した枠を使います。`--dry-run`は判定だけ行い、出力ディレクトリ・画像・CSVを作りません。
 
 `log.csv`はPython版と同じ9列、UTF-8 BOM、CRLF、追記形式です。入力値が表計算ソフトで数式にならないよう先頭の記号を保護します。CSVの書き込みに失敗しても、画像の処理結果JSONは返します。
 

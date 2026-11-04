@@ -101,7 +101,7 @@ fn one_and_eight_workers_produce_same_order_names_and_files() {
     for (i, dir) in ["a", "b", "c"].iter().enumerate() {
         let folder = input.join(dir);
         fs::create_dir(&folder).unwrap();
-        image::RgbImage::from_pixel(30, 40, image::Rgb([i as u8 * 50, 70, 90]))
+        image::RgbImage::from_pixel(60, 80, image::Rgb([i as u8 * 50, 70, 90]))
             .save(folder.join("same.png"))
             .unwrap();
     }

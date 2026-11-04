@@ -600,19 +600,6 @@ fn prepare(path: &Path, catalog: &Catalog, o: &Options) -> Result<Prepared, Stri
     let stem = path.file_stem().unwrap_or_default().to_string_lossy();
     let Some(found) = identify(&im, catalog, &o.resolution) else {
         result["note"] = json!("照合できる画像がありません");
-        if o.not_card {
-            return Ok(Prepared {
-                result,
-                save: Some(SaveTask {
-                    card: im,
-                    target: o.output.join("not_card"),
-                    name: stem.into_owned(),
-                    hash: None,
-                    round: false,
-                    propagate_skip: false,
-                }),
-            });
-        }
         return Ok(Prepared::complete(result));
     };
     result["distance"] = json!(found.distance);
@@ -1062,10 +1049,10 @@ mod tests {
             } else {
                 "good.png"
             };
-            RgbImage::from_pixel(30, 40, image::Rgb([10, 20, 30]))
+            RgbImage::from_pixel(60, 80, image::Rgb([10, 20, 30]))
                 .save(first.join(first_name))
                 .unwrap();
-            RgbImage::from_pixel(30, 40, image::Rgb([40, 50, 60]))
+            RgbImage::from_pixel(60, 80, image::Rgb([40, 50, 60]))
                 .save(second.join(second_name))
                 .unwrap();
             let mut command = Command::new(std::env::current_exe().unwrap());
@@ -1323,7 +1310,7 @@ mod tests {
     fn plain_input(temp: &Temp) -> PathBuf {
         let input = temp.0.join("input");
         fs::create_dir_all(&input).unwrap();
-        RgbImage::from_pixel(30, 40, image::Rgb([10, 20, 30]))
+        RgbImage::from_pixel(60, 80, image::Rgb([10, 20, 30]))
             .save(input.join("shot.png"))
             .unwrap();
         input
@@ -1377,11 +1364,50 @@ mod tests {
     }
 
     #[test]
+    fn image_without_card_frame_is_not_copied() {
+        let temp = Temp::new();
+        let input = plain_input(&temp);
+        RgbImage::new(30, 40).save(input.join("shot.png")).unwrap();
+        let o = options(&temp);
+        let summary = run_one(&o, input.clone());
+        let result = &summary["results"][0];
+        assert_eq!(result["note"], "照合できる画像がありません");
+        assert_eq!(result["saved_path"], "");
+        assert_eq!(
+            Path::new(result["source"].as_str().unwrap()),
+            input.join("shot.png")
+        );
+        assert!(!o.output.join("not_card").exists());
+    }
+
+    #[test]
+    fn unmatched_card_frame_saves_only_the_crop() {
+        let temp = Temp::new();
+        let source = temp.0.join("private-photo.png");
+        RgbImage::from_pixel(100, 150, image::Rgb([10, 20, 30]))
+            .save(&source)
+            .unwrap();
+        let mut o = options(&temp);
+        o.resolution = Resolution::Box([10, 10, 70, 90]);
+        let summary = run_one(&o, source);
+        let result = &summary["results"][0];
+        assert!(result["distance"].as_u64().unwrap() > 36);
+        assert_eq!(result["status"], "カードなし");
+        let saved = Path::new(result["saved_path"].as_str().unwrap());
+        assert_eq!(
+            fs::canonicalize(saved.parent().unwrap()).unwrap(),
+            fs::canonicalize(o.output.join("not_card")).unwrap()
+        );
+        assert_eq!(load_image(saved).unwrap().dimensions(), (60, 80));
+    }
+
+    #[test]
     fn results_list_every_file_they_created() {
         let temp = Temp::new();
         let input = plain_input(&temp);
         for (format, count) in [("webp", 1), ("png", 1), ("both", 2)] {
             let mut o = options(&temp);
+            o.resolution = Resolution::Card;
             o.output = temp.0.join(format!("output-{format}"));
             o.format = format.into();
             let summary = run_one(&o, input.clone());
@@ -1410,6 +1436,7 @@ mod tests {
         }
         for format in ["webp", "both"] {
             let mut o = options(&temp);
+            o.resolution = Resolution::Card;
             o.output = temp.0.join(format!("cancel-{format}"));
             o.format = format.into();
             o.workers = 2;
@@ -1445,7 +1472,8 @@ mod tests {
     fn csv_failure_is_reported_without_counting_as_image_error() {
         let temp = Temp::new();
         let input = plain_input(&temp);
-        let o = options(&temp);
+        let mut o = options(&temp);
+        o.resolution = Resolution::Card;
         fs::create_dir_all(o.output.join("log.csv")).unwrap();
         let summary = run_one(&o, input);
         assert_eq!(summary["error"], 0);
@@ -1462,7 +1490,8 @@ mod tests {
         use std::os::windows::fs::OpenOptionsExt;
         let temp = Temp::new();
         let input = plain_input(&temp);
-        let o = options(&temp);
+        let mut o = options(&temp);
+        o.resolution = Resolution::Card;
         fs::create_dir_all(&o.output).unwrap();
         let log = o.output.join("log.csv");
         fs::write(&log, b"").unwrap();
@@ -1560,6 +1589,53 @@ mod tests {
             .unwrap();
         input
     }
+    #[test]
+    fn unmatched_detail_saves_only_its_detected_frame() {
+        let temp = Temp::new();
+        let source = temp.0.join("detail.png");
+        let mut im = RgbImage::new(SIZE.0, SIZE.1);
+        draw_card(
+            &mut im,
+            mdript_core::predict_detail_box(SIZE.0, SIZE.1),
+            5,
+            false,
+        );
+        im.save(&source).unwrap();
+        let mut o = options(&temp);
+        o.resolution = Resolution::Fixed;
+        let detail_hash = u128::from_str_radix(
+            &mdript_core::artwork_hash(
+                &im,
+                mdript_core::predict_detail_box(SIZE.0, SIZE.1),
+                false,
+                false,
+            )
+            .unwrap(),
+            16,
+        )
+        .unwrap();
+        let (catalog, found) = (0..128)
+            .find_map(|shift| {
+                let hash = detail_hash ^ ((1u128 << 40) - 1).rotate_left(shift);
+                let catalog = Catalog::from_json(
+                    &json!({"hashes":{"9001":[format!("{hash:032x}")]}}).to_string(),
+                    None,
+                    None,
+                )
+                .unwrap();
+                let found = identify(&im, &catalog, &o.resolution)?;
+                (found.screen == Screen::Detail && found.distance > 36).then_some((catalog, found))
+            })
+            .expect("詳細画面として検出される不一致画像を用意する");
+        let prepared = prepare(&source, &catalog, &o).unwrap();
+        let crop_size = found.card(&im).dimensions();
+        let result = Sequencer::default().finish(0, Ok(prepared), &o).unwrap();
+        let saved = Path::new(result["saved_path"].as_str().unwrap());
+        assert_eq!(load_image(saved).unwrap().dimensions(), crop_size);
+        assert_ne!(crop_size, im.dimensions());
+        assert_eq!(saved.parent().unwrap().file_name().unwrap(), "not_card");
+    }
+
     #[test]
     fn detail_folder_option_keeps_the_usual_layout_under_detail() {
         let temp = Temp::new();
