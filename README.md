@@ -10,11 +10,11 @@
 
 ## ダウンロード
 
-**[開闢 2.2.1 をダウンロード（Windows用zip）](https://github.com/yugioh-hack/kaibyaku/releases/download/v2.2.1/mdript-v2.2.1-windows-x64.zip)**
+**[開闢 2.2.2 をダウンロード（Windows用zip）](https://github.com/yugioh-hack/kaibyaku/releases/download/v2.2.2/mdript-v2.2.2-windows-x64.zip)**
 
-[リリース情報・SHA-256](https://github.com/yugioh-hack/kaibyaku/releases/tag/v2.2.1)
+[リリース情報・SHA-256](https://github.com/yugioh-hack/kaibyaku/releases/tag/v2.2.2)
 
-2.2.1では、新しいカードの照合データを追加しました。新しいカードの名前は、「カードデータ更新」→「カード名を取得」で表示されます。
+2.2.2では、新しいカードの照合データを追加し、詳細画面から切り抜いた画像の縁を直しました。新しいカードの名前は、「カードデータ更新」→「カード名を取得」で表示されます。
 
 2.2.0では、デッキ編集などで開くカード詳細画面のスクリーンショットからも切り抜けるようになりました。詳細画面のカードは既定で `detail/` に保存します。
 
