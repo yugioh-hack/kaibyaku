@@ -22,8 +22,8 @@ use tauri::{AppHandle, Emitter, Manager, State};
 const USER_DIR_NAME: &str = "mdript-v2";
 const LEGACY_DIR_NAME: &str = "mdript";
 const CANCELLED: &str = "更新を中断しました";
-/// 最新版の案内で開くページ。ダウンロードページができたら、ここだけ差し替える。
-const DOWNLOAD_URL: &str = "https://github.com/yugioh-hack/kaibyaku/releases/latest";
+/// 最新版の案内で開くダウンロードページ（GitHub Pages。docs/index.html）。
+const DOWNLOAD_URL: &str = "https://yugioh-hack.github.io/kaibyaku/";
 
 #[derive(Default)]
 struct BusyState {
