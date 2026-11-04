@@ -1,0 +1,472 @@
+<!doctype html>
+<html lang="ja">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>切り抜き範囲</title>
+<style>
+  :root { color-scheme: dark; font: 14px system-ui, sans-serif; background: #15171b; color: #e6e8ed; }
+  * { box-sizing: border-box; }
+  body { margin: 0; }
+  button, input, select, .file-button { font: inherit; color: inherit; background: #292d35; border: 1px solid #4c5360; border-radius: 5px; padding: 6px 9px; }
+  button, select, .file-button { cursor: pointer; }
+  button:hover, .file-button:hover { background: #3a414c; }
+  :focus-visible { outline: 2px solid #6ee7ce; outline-offset: 2px; }
+  button[aria-pressed="true"] { border-color: #6ee7ce; background: #21423c; }
+  header { display: flex; flex-wrap: wrap; align-items: center; gap: 10px 18px; padding: 12px; border-bottom: 1px solid #3b4049; }
+  h1 { font-size: 16px; margin: 0; }
+  .modes { display: flex; gap: 6px; }
+  #files { position: absolute; width: 1px; height: 1px; opacity: 0; }
+  .coordinates { display: flex; gap: 7px; align-items: center; flex-wrap: wrap; }
+  label { display: inline-flex; align-items: center; gap: 5px; }
+  input[type="number"] { width: 78px; font-family: ui-monospace, monospace; }
+  output, code { font-family: ui-monospace, monospace; }
+  main { display: grid; grid-template-columns: 280px minmax(0, 1fr); height: calc(100dvh - 116px); min-height: 400px; }
+  aside { overflow: auto; padding: 12px; border-right: 1px solid #3b4049; }
+  #images { display: grid; gap: 6px; margin-bottom: 12px; }
+  #images button { display: grid; grid-template-columns: 64px minmax(0, 1fr); align-items: center; gap: 9px; text-align: left; }
+  #images img { width: 64px; height: 40px; object-fit: contain; }
+  #images span { overflow-wrap: anywhere; }
+  #images small { display: block; color: #b5bdca; }
+  #overview { display: block; width: 100%; height: 150px; background: #101216; cursor: crosshair; }
+  .edges { display: grid; gap: 9px; margin-top: 12px; }
+  .edge { border: 1px solid #3b4049; border-radius: 5px; overflow: hidden; }
+  .edge > button { width: 100%; display: flex; justify-content: space-between; border-radius: 0; border: 0; }
+  .strip { width: 100%; height: 18px; display: block; cursor: crosshair; image-rendering: pixelated; }
+  summary { cursor: pointer; padding: 5px 9px; }
+  .pixels { max-height: 180px; overflow: auto; font: 12px ui-monospace, monospace; }
+  .pixel { display: block; width: 100%; border: 0; border-radius: 0; padding: 3px 9px; text-align: left; white-space: pre; }
+  .dark { color: #ffb09e; }
+  #workspace { display: grid; grid-template-rows: auto minmax(0, 1fr) auto; min-width: 0; min-height: 0; }
+  .view-controls { display: flex; align-items: center; flex-wrap: wrap; gap: 10px; padding: 10px 12px; }
+  #view { display: block; width: 100%; height: 100%; touch-action: none; outline-offset: -3px; }
+  #pixel { min-height: 30px; padding: 6px 12px; }
+  footer { display: flex; align-items: center; flex-wrap: wrap; gap: 12px; padding: 9px 12px; border-top: 1px solid #3b4049; min-height: 43px; }
+  #message { color: #ffb09e; }
+  #copy-value { min-width: 225px; width: 245px; }
+  @media (max-width: 760px) { main { grid-template-columns: 220px minmax(0, 1fr); height: 75dvh; } aside { padding: 8px; } }
+</style>
+<header>
+  <h1>切り抜き範囲</h1>
+  <div class="modes" role="group" aria-label="画面">
+    <button id="mode-detail" aria-pressed="true">詳細</button>
+    <button id="mode-maximized" aria-pressed="false">拡大</button>
+  </div>
+  <label class="file-button">画像を追加<input id="files" type="file" accept="image/*" multiple></label>
+  <div class="coordinates">
+    <label>left<input id="left" type="number" step="1" value="176"></label>
+    <label>top<input id="top" type="number" step="1" value="222"></label>
+    <label title="右端（含まない）">right<input id="right" type="number" step="1" value="771"></label>
+    <label title="下端（含まない）">bottom<input id="bottom" type="number" step="1" value="1090"></label>
+    <output id="size">595 × 868</output>
+    <button id="reset">初期値</button>
+  </div>
+</header>
+<main>
+  <aside>
+    <nav id="images" aria-label="画像"></nav>
+    <canvas id="overview" aria-label="全体の移動" width="256" height="150"></canvas>
+    <div class="edges" id="edges"></div>
+  </aside>
+  <section id="workspace">
+    <div class="view-controls">
+      <label>倍率<select id="zoom"><option>8</option><option selected>16</option><option>24</option><option>32</option></select>×</label>
+      <button id="grid" aria-pressed="true">画素の境界</button>
+      <button id="mask" aria-pressed="true">範囲外を暗く</button>
+      <button id="home">左上へ</button>
+    </div>
+    <canvas id="view" tabindex="0" aria-label="切り抜き範囲。矢印キーで選択した辺を1px移動。辺をドラッグして調整。範囲外のドラッグまたはホイールで移動。"></canvas>
+    <output id="pixel"></output>
+  </section>
+</main>
+<footer>
+  <input id="copy-value" aria-label="切り抜き座標" readonly value="[176, 222, 771, 1090]">
+  <button id="copy">コピー</button>
+  <output id="message" role="status"></output>
+</footer>
+<script>
+'use strict';
+const $ = id => document.getElementById(id);
+const names = ['left', 'top', 'right', 'bottom'];
+const labels = ['左', '上', '右', '下'];
+// 画面ごとの初期値（2560x1440）。Rust の predict_detail_box / predict_card_box と同じ。
+const initials = { detail: [176, 222, 771, 1090], maximized: [833, 69, 1727, 1371] };
+const references = {};
+for (const key in initials) references[key] = { box: [...initials[key]], width: 2560, height: 1440 };
+let mode = 'detail';
+const images = [];
+let active = -1;
+let box = [...initials[mode]];
+// Keep the last edited integer rectangle in its own image's coordinate system.
+// Switching images never feeds a rounded rectangle back into this reference.
+let reference = references[mode];
+let edge = 0;
+let zoom = 16;
+let origin = { x: 160, y: 206 };
+let drag = null;
+let grid = true;
+let mask = true;
+let edgePixels = [[], [], [], []];
+const view = $('view');
+const ctx = view.getContext('2d');
+const overview = $('overview');
+const overviewCtx = overview.getContext('2d');
+let overviewMap = { scale: 1, x: 0, y: 0 };
+const edgeUI = names.map((name, index) => {
+  const section = document.createElement('section');
+  section.className = 'edge';
+  const button = document.createElement('button');
+  button.innerHTML = `<span>${labels[index]}</span><output>暗い画素 0 / 0</output>`;
+  button.title = 'R + G + B < 200（角の16pxを除く）';
+  button.onclick = () => selectEdge(index, true);
+  const strip = document.createElement('canvas');
+  strip.className = 'strip';
+  strip.height = 1;
+  strip.setAttribute('aria-label', `${labels[index]}の最外周`);
+  strip.onclick = event => {
+    const pixels = edgePixels[index];
+    if (!pixels.length) return;
+    const bounds = strip.getBoundingClientRect();
+    const p = pixels[Math.min(pixels.length - 1, Math.floor((event.clientX - bounds.left) / bounds.width * pixels.length))];
+    selectEdge(index);
+    center(p.x, p.y);
+    showPixel(p.x, p.y);
+  };
+  const details = document.createElement('details');
+  const summary = document.createElement('summary');
+  summary.textContent = '画素値 RGB';
+  const values = document.createElement('div');
+  values.className = 'pixels';
+  details.append(summary, values);
+  details.ontoggle = () => { if (details.open) renderValues(index); };
+  section.append(button, strip, details);
+  $('edges').append(section);
+  return { button, strip, details, values };
+});
+
+function roundEven(value) {
+  const low = Math.floor(value);
+  const fraction = value - low;
+  return fraction === 0.5 ? low + (low % 2) : Math.round(value);
+}
+
+function projectedBox(width, height) {
+  const scale = height / reference.height;
+  const [l, t, r, b] = reference.box;
+  const left = width / 2 + (l - reference.width / 2) * scale;
+  const top = t * scale;
+  return [left, top, left + (r - l) * scale, top + (b - t) * scale].map(roundEven);
+}
+
+function dimensions() {
+  return active < 0 ? { width: 2560, height: 1440 } : images[active];
+}
+
+function boundedBox(candidate) {
+  const { width, height } = dimensions();
+  const [l, t, r, b] = candidate;
+  return [Math.max(0, Math.min(width - 1, l)), Math.max(0, Math.min(height - 1, t)),
+    Math.max(1, Math.min(width, r)), Math.max(1, Math.min(height, b))];
+}
+
+function setEdge(index, value) {
+  if (!Number.isSafeInteger(value)) { syncInputs(); return; }
+  const { width, height } = dimensions();
+  const limits = [[0, box[2] - 1], [0, box[3] - 1], [box[0] + 1, width], [box[1] + 1, height]];
+  box[index] = Math.max(limits[index][0], Math.min(limits[index][1], value));
+  reference = references[mode] = { box: [...box], width, height };
+  $('message').textContent = '';
+  refresh();
+}
+
+function syncInputs() {
+  names.forEach((name, i) => { $(name).value = box[i]; });
+  $('size').textContent = `${box[2] - box[0]} × ${box[3] - box[1]}`;
+  $('copy-value').value = `[${box.join(', ')}]`;
+}
+
+function selectEdge(index, jump = false) {
+  edge = index;
+  edgeUI.forEach((ui, i) => ui.button.setAttribute('aria-pressed', String(i === edge)));
+  if (jump) {
+    const [l, t, r, b] = box;
+    center(index === 0 ? l : index === 2 ? r : (l + r) / 2,
+      index === 1 ? t : index === 3 ? b : (t + b) / 2);
+    view.focus({ preventScroll: true });
+  }
+  draw();
+}
+
+function center(x, y) {
+  const bounds = view.getBoundingClientRect();
+  origin = { x: x - bounds.width / zoom / 2, y: y - bounds.height / zoom / 2 };
+  draw();
+}
+
+function readPixel(x, y) {
+  if (active < 0) return null;
+  const image = images[active];
+  if (x < 0 || y < 0 || x >= image.width || y >= image.height) return null;
+  const offset = (y * image.width + x) * 4;
+  return { x, y, rgb: Array.from(image.data.subarray(offset, offset + 3)) };
+}
+
+function showPixel(x, y) {
+  const p = readPixel(x, y);
+  $('pixel').textContent = p ? `(${x}, ${y})  RGB (${p.rgb.join(', ')})  Σ ${p.rgb.reduce((a, b) => a + b, 0)}` : '';
+}
+
+function renderValues(index) {
+  const fragment = document.createDocumentFragment();
+  for (const p of edgePixels[index]) {
+    const button = document.createElement('button');
+    button.className = `pixel${p.rgb.reduce((a, b) => a + b, 0) < 200 ? ' dark' : ''}`;
+    button.textContent = `${String(p.x).padStart(4)},${String(p.y).padStart(4)}  ${p.rgb.map(v => String(v).padStart(3)).join(' ')}`;
+    button.onclick = () => { selectEdge(index); center(p.x, p.y); showPixel(p.x, p.y); };
+    fragment.append(button);
+  }
+  edgeUI[index].values.replaceChildren(fragment);
+}
+
+function statistics() {
+  const [l, t, r, b] = box;
+  edgePixels = [[], [], [], []];
+  if (active >= 0) {
+    for (let y = t; y < b; y++) { edgePixels[0].push(readPixel(l, y)); edgePixels[2].push(readPixel(r - 1, y)); }
+    for (let x = l; x < r; x++) { edgePixels[1].push(readPixel(x, t)); edgePixels[3].push(readPixel(x, b - 1)); }
+  }
+  edgeUI.forEach((ui, index) => {
+    const pixels = edgePixels[index];
+    // カードの角は丸いので、両端16pxは数えない。
+    const inner = pixels.length > 32 ? pixels.slice(16, -16) : pixels;
+    const dark = inner.filter(p => p.rgb.reduce((a, b) => a + b, 0) < 200).length;
+    ui.button.querySelector('output').textContent = `暗い画素 ${dark} / ${inner.length}`;
+    ui.strip.width = Math.max(1, pixels.length);
+    const context = ui.strip.getContext('2d');
+    pixels.forEach((p, i) => { context.fillStyle = `rgb(${p.rgb.join(',')})`; context.fillRect(i, 0, 1, 1); });
+    if (ui.details.open) renderValues(index);
+  });
+}
+
+function refresh() { syncInputs(); statistics(); draw(); }
+
+function draw() {
+  const bounds = view.getBoundingClientRect();
+  const dpr = window.devicePixelRatio || 1;
+  const width = Math.max(1, Math.round(bounds.width * dpr));
+  const height = Math.max(1, Math.round(bounds.height * dpr));
+  if (view.width !== width || view.height !== height) { view.width = width; view.height = height; }
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  ctx.fillStyle = '#101216';
+  ctx.fillRect(0, 0, bounds.width, bounds.height);
+  if (active < 0) return;
+  // Snap only the view origin to device pixels; crop coordinates remain integers.
+  const ox = Math.round(-origin.x * zoom * dpr) / dpr;
+  const oy = Math.round(-origin.y * zoom * dpr) / dpr;
+  const image = images[active];
+  ctx.imageSmoothingEnabled = false;
+  ctx.drawImage(image.canvas, ox, oy, image.width * zoom, image.height * zoom);
+  const [l, t, r, b] = box;
+  const x1 = ox + l * zoom, y1 = oy + t * zoom, x2 = ox + r * zoom, y2 = oy + b * zoom;
+  if (mask) {
+    ctx.fillStyle = '#000a';
+    ctx.beginPath();
+    ctx.rect(0, 0, bounds.width, bounds.height);
+    ctx.rect(x1, y1, x2 - x1, y2 - y1);
+    ctx.fill('evenodd');
+  }
+  if (grid) {
+    ctx.beginPath();
+    for (let x = ox % zoom; x < bounds.width; x += zoom) { ctx.moveTo(x, 0); ctx.lineTo(x, bounds.height); }
+    for (let y = oy % zoom; y < bounds.height; y += zoom) { ctx.moveTo(0, y); ctx.lineTo(bounds.width, y); }
+    ctx.strokeStyle = '#ffffff22'; ctx.lineWidth = 1; ctx.stroke();
+  }
+  const lines = [[x1, y1, x1, y2], [x1, y1, x2, y1], [x2, y1, x2, y2], [x1, y2, x2, y2]];
+  lines.forEach((line, i) => {
+    ctx.beginPath(); ctx.moveTo(line[0], line[1]); ctx.lineTo(line[2], line[3]);
+    ctx.strokeStyle = i === edge ? '#6ee7ce' : '#ffcc66'; ctx.lineWidth = i === edge ? 2 : 1; ctx.stroke();
+  });
+  overviewCtx.clearRect(0, 0, overview.width, overview.height);
+  const scale = Math.min(overview.width / image.width, overview.height / image.height);
+  const x = (overview.width - image.width * scale) / 2, y = (overview.height - image.height * scale) / 2;
+  overviewMap = { scale, x, y };
+  overviewCtx.drawImage(image.canvas, x, y, image.width * scale, image.height * scale);
+  overviewCtx.strokeStyle = '#6ee7ce'; overviewCtx.lineWidth = 1;
+  overviewCtx.strokeRect(x + l * scale, y + t * scale, (r - l) * scale, (b - t) * scale);
+  overviewCtx.strokeStyle = '#fff';
+  overviewCtx.strokeRect(x + origin.x * scale, y + origin.y * scale, bounds.width / zoom * scale, bounds.height / zoom * scale);
+}
+
+function activate(index) {
+  const previous = dimensions();
+  const bounds = view.getBoundingClientRect();
+  const cx = origin.x + bounds.width / zoom / 2, cy = origin.y + bounds.height / zoom / 2;
+  active = index;
+  const image = images[active];
+  const candidate = boundedBox(projectedBox(image.width, image.height));
+  // Tiny or unusually shaped images still get a nonempty in-bounds rectangle.
+  candidate[2] = Math.max(candidate[0] + 1, candidate[2]);
+  candidate[3] = Math.max(candidate[1] + 1, candidate[3]);
+  box = candidate;
+  Array.from($('images').children).forEach((button, i) => button.setAttribute('aria-pressed', String(index === i)));
+  $('message').textContent = '';
+  $('pixel').textContent = '';
+  center(image.width / 2 + (cx - previous.width / 2) * image.height / previous.height, cy * image.height / previous.height);
+  refresh();
+}
+
+async function loadFiles(files) {
+  const errors = [];
+  let added = 0;
+  for (const file of files) {
+    const url = URL.createObjectURL(file);
+    try {
+      const img = new Image();
+      img.src = url;
+      await img.decode();
+      const canvas = document.createElement('canvas');
+      canvas.width = img.naturalWidth; canvas.height = img.naturalHeight;
+      const context = canvas.getContext('2d', { willReadFrequently: true });
+      context.drawImage(img, 0, 0);
+      const data = context.getImageData(0, 0, canvas.width, canvas.height).data;
+      const index = images.length;
+      images.push({ canvas, width: canvas.width, height: canvas.height, data });
+      const button = document.createElement('button');
+      const thumb = new Image();
+      // Store only a small thumbnail, not another full decoded screenshot.
+      const thumbnail = document.createElement('canvas'); thumbnail.width = 64; thumbnail.height = 40;
+      const ratio = Math.min(64 / canvas.width, 40 / canvas.height);
+      thumbnail.getContext('2d').drawImage(canvas, 0, 0, canvas.width * ratio, canvas.height * ratio);
+      thumb.src = thumbnail.toDataURL(); thumb.alt = '';
+      const caption = document.createElement('span'); caption.textContent = file.name;
+      const size = document.createElement('small'); size.textContent = `${canvas.width} × ${canvas.height}`;
+      caption.append(size); button.append(thumb, caption);
+      button.onclick = () => activate(index);
+      button.setAttribute('aria-pressed', 'false');
+      $('images').append(button);
+      if (active < 0) { activate(index); center(box[0], box[1]); }
+      added++;
+    } catch { errors.push(file.name); }
+    finally { URL.revokeObjectURL(url); }
+  }
+  $('message').textContent = errors.length ? `読み込めません: ${errors.join(', ')}` : '';
+  return added;
+}
+
+$('files').onchange = async event => { await loadFiles(event.target.files); event.target.value = ''; };
+document.addEventListener('dragover', event => { event.preventDefault(); });
+document.addEventListener('drop', event => { event.preventDefault(); loadFiles(event.dataTransfer.files); });
+names.forEach((name, i) => {
+  $(name).onfocus = () => selectEdge(i);
+  $(name).onchange = () => setEdge(i, $(name).valueAsNumber);
+});
+$('reset').onclick = () => {
+  $('message').textContent = '';
+  reference = references[mode] = { box: [...initials[mode]], width: 2560, height: 1440 };
+  const { width, height } = dimensions();
+  box = boundedBox(projectedBox(width, height));
+  box[2] = Math.max(box[0] + 1, box[2]); box[3] = Math.max(box[1] + 1, box[3]);
+  center(box[0], box[1]); refresh();
+};
+function setMode(next) {
+  if (next === mode) return;
+  mode = next;
+  reference = references[mode];
+  $('mode-detail').setAttribute('aria-pressed', String(mode === 'detail'));
+  $('mode-maximized').setAttribute('aria-pressed', String(mode === 'maximized'));
+  const { width, height } = dimensions();
+  box = boundedBox(projectedBox(width, height));
+  box[2] = Math.max(box[0] + 1, box[2]); box[3] = Math.max(box[1] + 1, box[3]);
+  $('message').textContent = '';
+  center(box[0], box[1]); refresh();
+}
+$('mode-detail').onclick = () => setMode('detail');
+$('mode-maximized').onclick = () => setMode('maximized');
+$('home').onclick = () => center(box[0], box[1]);
+$('zoom').onchange = () => {
+  const bounds = view.getBoundingClientRect();
+  const x = origin.x + bounds.width / zoom / 2, y = origin.y + bounds.height / zoom / 2;
+  zoom = Number($('zoom').value); center(x, y);
+};
+$('grid').onclick = () => { grid = !grid; $('grid').setAttribute('aria-pressed', String(grid)); draw(); };
+$('mask').onclick = () => { mask = !mask; $('mask').setAttribute('aria-pressed', String(mask)); draw(); };
+$('copy').onclick = async () => {
+  const value = $('copy-value').value;
+  try { await navigator.clipboard.writeText(value); $('message').textContent = 'コピーしました'; }
+  catch {
+    $('copy-value').focus(); $('copy-value').select();
+    $('message').textContent = document.execCommand('copy') ? 'コピーしました' : 'Ctrl+C でコピー';
+  }
+};
+document.addEventListener('keydown', event => {
+  if (!['ArrowLeft', 'ArrowUp', 'ArrowRight', 'ArrowDown'].includes(event.key)) return;
+  if (event.target.closest('input, select, textarea, summary') || event.ctrlKey || event.metaKey || event.altKey) return;
+  event.preventDefault();
+  setEdge(edge, box[edge] + (event.key === 'ArrowLeft' || event.key === 'ArrowUp' ? -1 : 1));
+});
+
+function point(event) {
+  const bounds = view.getBoundingClientRect();
+  return { x: origin.x + (event.clientX - bounds.left) / zoom, y: origin.y + (event.clientY - bounds.top) / zoom };
+}
+function hitEdge(p) {
+  const [l, t, r, b] = box;
+  const tolerance = 7 / zoom;
+  const hits = [Math.abs(p.x - l), Math.abs(p.y - t), Math.abs(p.x - r), Math.abs(p.y - b)];
+  return hits.map((distance, index) => ({ distance, index }))
+    .filter(({ distance, index }) => distance <= tolerance && (index % 2 === 0
+      ? p.y >= t - tolerance && p.y <= b + tolerance : p.x >= l - tolerance && p.x <= r + tolerance))
+    .sort((a, b) => a.distance - b.distance || (a.index === edge ? -1 : b.index === edge ? 1 : a.index - b.index))[0]?.index ?? -1;
+}
+view.onpointerdown = event => {
+  if (active < 0 || ![0, 1].includes(event.button)) return;
+  event.preventDefault(); view.focus({ preventScroll: true });
+  const p = point(event), hit = event.button === 0 ? hitEdge(p) : -1;
+  drag = { id: event.pointerId, hit, start: p, value: hit >= 0 ? box[hit] : 0,
+    clientX: event.clientX, clientY: event.clientY, origin: { ...origin } };
+  if (hit >= 0) selectEdge(hit);
+  view.setPointerCapture(event.pointerId);
+};
+view.onpointermove = event => {
+  const p = point(event);
+  showPixel(Math.floor(p.x), Math.floor(p.y));
+  if (drag && drag.id === event.pointerId) {
+    if (drag.hit >= 0) {
+      const delta = drag.hit % 2 === 0 ? p.x - drag.start.x : p.y - drag.start.y;
+      setEdge(drag.hit, drag.value + Math.round(delta));
+    } else {
+      origin = { x: drag.origin.x - (event.clientX - drag.clientX) / zoom,
+        y: drag.origin.y - (event.clientY - drag.clientY) / zoom };
+      draw();
+    }
+  } else {
+    const hit = hitEdge(p);
+    view.style.cursor = hit < 0 ? 'grab' : hit % 2 === 0 ? 'ew-resize' : 'ns-resize';
+  }
+};
+function endDrag(event) {
+  if (drag?.id !== event.pointerId) return;
+  drag = null;
+  if (view.hasPointerCapture(event.pointerId)) view.releasePointerCapture(event.pointerId);
+}
+view.onpointerup = endDrag;
+view.onpointercancel = endDrag;
+view.onlostpointercapture = () => { drag = null; };
+view.addEventListener('wheel', event => {
+  event.preventDefault();
+  const unit = event.deltaMode === 1 ? 16 : event.deltaMode === 2 ? view.clientHeight : 1;
+  origin.x += (event.shiftKey ? event.deltaY : event.deltaX) * unit / zoom;
+  origin.y += (event.shiftKey ? 0 : event.deltaY) * unit / zoom;
+  draw();
+}, { passive: false });
+overview.onpointerdown = event => {
+  if (active < 0) return;
+  const bounds = overview.getBoundingClientRect();
+  const x = (event.clientX - bounds.left) * overview.width / bounds.width;
+  const y = (event.clientY - bounds.top) * overview.height / bounds.height;
+  center((x - overviewMap.x) / overviewMap.scale, (y - overviewMap.y) / overviewMap.scale);
+};
+new ResizeObserver(draw).observe(view);
+selectEdge(0);
+refresh();
+</script>
+</html>
