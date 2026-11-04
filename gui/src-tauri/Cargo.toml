@@ -1,6 +1,6 @@
 [package]
 name = "mdript-gui"
-version = "2.2.0"
+version = "2.2.1"
 description = "開闢 — MDカード画像ツール"
 edition = "2024"
 license = "MIT"
