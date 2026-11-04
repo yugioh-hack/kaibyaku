@@ -1,3 +1,7 @@
+import { createRequire } from "node:module";
+import { compile } from "@vue/compiler-ssr";
+import { createSSRApp } from "vue";
+import { renderToString } from "vue/server-renderer";
 import test from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
@@ -49,3 +53,27 @@ async function reviewCopies() {
 }
 
 test("登録後は新しい保存ができた場合だけ古いコピーを削除する", reviewCopies);
+
+// 実際の設定欄をVueで描画し、無効属性を確かめる。
+async function settings(overrides) {
+  const template = source.match(/<section class="panel">[\s\S]*?<\/section>/)[0];
+  const { code } = compile(template, { mode: "function" });
+  const ssrRender = new Function("require", code)(createRequire(import.meta.url));
+  const state = { output: "C:/cards", format: "webp", english: "英語名で保存", split: "ja と en に分ける",
+    rounded: true, recursive: true, skipDuplicate: true, saveReview: true, saveNotCard: true, locked: false, detail: "detail/ に分ける", DETAIL: { "detail/ に分ける": "folder", "名前に _detail を付ける": "suffix" },
+    FORMATS: [{ value: "webp", label: "webp" }], ENGLISH: { 英語名で保存: "name", 区別しない: "off" },
+    SPLIT: { 分けない: "none", "ja と en に分ける": "both" }, chooseOutput() {}, openOutput() {}, ...overrides };
+  return renderToString(createSSRApp({ ssrRender, setup: () => state }));
+}
+
+async function splitSetting() {
+  for (const english of ["英語名で保存", "日本語名で保存", "区別しない"]) {
+    const html = await settings({ english });
+    const selects = [...html.matchAll(/<select([^>]*)>/g)];
+    assert.equal(selects[2][1].includes("disabled"), english === "区別しない");
+    assert.match(html, /<option>ja と en に分ける<\/option>/);
+  }
+}
+
+
+test("言語を区別しない間は言語別フォルダを無効にする", splitSetting);

@@ -657,7 +657,7 @@ onBeforeUnmount(() => {
         </label>
         <label class="field">
           言語でフォルダを
-          <select v-model="split">
+          <select v-model="split" :disabled="english === '区別しない'">
             <option v-for="label in Object.keys(SPLIT)" :key="label">{{ label }}</option>
           </select>
         </label>
