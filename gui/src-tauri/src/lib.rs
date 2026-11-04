@@ -546,7 +546,9 @@ fn open_folder(path: String) -> Result<(), String> {
     if !path.is_absolute() {
         return Err("フォルダの場所を、ドライブ名から指定してください".into());
     }
-    fs::create_dir_all(&path).map_err(|e| format!("出力先を開けませんでした。\n{e}"))?;
+    if !path.is_dir() {
+        return Err("出力先フォルダがありません".into());
+    }
     std::process::Command::new("explorer.exe")
         .arg(&path)
         .spawn()
@@ -629,6 +631,26 @@ mod tests {
         // 保存先そのものを作れない場合も同じ
         assert!(write_config(&dir.join("missing").join("deeper"), &config).is_err());
         fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn opening_a_missing_folder_does_not_create_it() {
+        let root = std::env::temp_dir().join(format!("mdript-open-missing-{}", std::process::id()));
+        let path = root.join("missing/output");
+        assert_eq!(
+            open_folder(path.to_string_lossy().into_owned()).unwrap_err(),
+            "出力先フォルダがありません"
+        );
+        assert!(!root.exists());
+        fs::create_dir_all(&root).unwrap();
+        let file = root.join("file");
+        fs::write(&file, b"keep").unwrap();
+        assert_eq!(
+            open_folder(file.to_string_lossy().into_owned()).unwrap_err(),
+            "出力先フォルダがありません"
+        );
+        assert_eq!(fs::read(&file).unwrap(), b"keep");
+        fs::remove_dir_all(root).unwrap();
     }
 
     #[test]
