@@ -18,6 +18,8 @@ const UA: &str = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (
 const MAX_RESPONSE: u64 = 32 * 1024 * 1024;
 const INTERVAL: Duration = Duration::from_millis(400);
 const PAGE_SIZE: usize = 2000;
+/// 取得に失敗したときに添える案内。公式サイトの作りが変わると古い版は取得できなくなるため、最新版の確認を促す。
+pub const UPDATE_HINT: &str = "時間をおいても直らない場合は、公式サイトの作りが変わった可能性があります。最新版の開闢が出ていないか、リリースページを確認してください。";
 static CANCELLED: AtomicBool = AtomicBool::new(false);
 static CANCEL_HANDLER: OnceLock<Result<(), String>> = OnceLock::new();
 
@@ -244,6 +246,15 @@ fn fetch_name_list(fetch: &mut impl Fetch, locale: &str) -> Result<Vec<NameRow>,
         let raw = fetch.get(&url, None)?;
         let html = String::from_utf8_lossy(&raw);
         let rows = parse_rows(&html);
+        // 行はあるのに半分以上読み取れないときは、ページの作りが変わったとみなして止める
+        // （一部だけ読めた一覧でカード名を置き換えないため）
+        let blocks = pattern("row").split(&html).count().saturating_sub(1);
+        if blocks > 0 && rows.len() * 2 < blocks {
+            return Err(format!(
+                "カード名の一覧を読み取れませんでした（{blocks} 行中 {} 行）。公式サイトの作りが変わった可能性があります。最新版の開闢が出ていないか、リリースページを確認してください。",
+                rows.len()
+            ));
+        }
         let count = rows.len();
         all.extend(rows);
         report(&format!("{label}... {} 件", all.len()));
@@ -257,7 +268,9 @@ fn fetch_name_list(fetch: &mut impl Fetch, locale: &str) -> Result<Vec<NameRow>,
 fn fetch_card_names(fetch: &mut impl Fetch) -> Result<Map<String, Value>, String> {
     let ja = fetch_name_list(fetch, "ja")?;
     if ja.is_empty() {
-        return Err("カード名を1件も取得できませんでした。公式データベースがメンテナンス中の可能性があります。".into());
+        return Err(format!(
+            "カード名を1件も取得できませんでした。公式データベースがメンテナンス中の可能性があります。{UPDATE_HINT}"
+        ));
     }
     let mut cards = Map::new();
     for row in ja {
@@ -381,6 +394,39 @@ mod tests {
             assert!(error.contains("英語名"));
             assert!(error.contains("更新していません"));
         }
+    }
+
+    fn names_error(japanese: &str) -> String {
+        let pages = HashMap::from([
+            ("ja".into(), japanese.as_bytes().to_vec()),
+            (
+                "en".into(),
+                include_bytes!("../tests/fixtures/names-en.html").to_vec(),
+            ),
+        ]);
+        fetch_card_names(&mut Fixture(pages)).unwrap_err()
+    }
+
+    #[test]
+    fn empty_page_asks_to_check_for_a_newer_version() {
+        let error = names_error("<html>maintenance</html>");
+        assert!(error.contains("メンテナンス"));
+        assert!(error.contains("リリースページ"));
+    }
+
+    #[test]
+    fn changed_row_markup_is_reported_instead_of_replacing_names() {
+        // 行はあるが card_name の class が無い（サイトの作りが変わった想定）
+        let changed = r#"<div class="t_row"><input class="cid" value="1"><span class="name">A</span></div>
+<div class="t_row"><input class="cid" value="2"><span class="name">B</span></div>"#;
+        let error = names_error(changed);
+        assert!(error.contains("2 行中 0 行"));
+        assert!(error.contains("作りが変わった"));
+        // 半分だけ読めた一覧も受け付けない
+        let half = r#"<div class="t_row"><input class="cid" value="1"><span class="card_name">A</span></div>
+<div class="t_row"><input class="cid" value="2"><span class="name">B</span></div>
+<div class="t_row"><input class="cid" value="3"><span class="name">C</span></div>"#;
+        assert!(names_error(half).contains("3 行中 1 行"));
     }
 
     #[test]

@@ -425,6 +425,7 @@ fn update_message(result: &Value) -> Vec<String> {
             number("seeded")
         ));
     }
+    let failed = result["failed"].as_array().map_or(0, Vec::len);
     if number("new_cards") > 0 || number("refreshed") > 0 {
         let names: Vec<_> = result["pack_names"]
             .as_array()
@@ -438,7 +439,6 @@ fn update_message(result: &Value) -> Vec<String> {
         } else {
             names.join("、")
         };
-        let failed = result["failed"].as_array().map_or(0, Vec::len);
         message.push(format!(
             "新しいカード {} 件 / 再録カードの確認 {} 件 / イラスト {} 枚を追加（{packs}）{}",
             number("new_cards"),
@@ -450,6 +450,9 @@ fn update_message(result: &Value) -> Vec<String> {
                 String::new()
             }
         ));
+    } else if failed > 0 {
+        // 1枚も取り込めなかったときに「新しいカードセットはありませんでした」と言わない
+        message.push(format!("カード画像を取得できませんでした（{failed} 件）"));
     } else if number("seeded") == 0 {
         message.push("新しいカードセットはありませんでした".into());
     }
@@ -467,6 +470,14 @@ fn update_message(result: &Value) -> Vec<String> {
     message
 }
 
+/// 取得の失敗が半分以上、または収録シリーズの一覧を取れなかったときは、最新版の確認を案内する。
+fn needs_update_hint(result: &Value) -> bool {
+    let number = |key: &str| result[key].as_u64().unwrap_or(0);
+    let failed = result["failed"].as_array().map_or(0, Vec::len) as u64;
+    result["pack_list_failed"] == true
+        || (failed > 0 && failed >= number("new_cards") + number("refreshed"))
+}
+
 /// Python 版と同じく、カード名を取得してから（hashes なら続けて）新しいカードセットを取り込む。
 #[tauri::command]
 fn start_update(app: AppHandle, busy: State<'_, Arc<Busy>>, hashes: bool) -> Result<(), String> {
@@ -481,11 +492,18 @@ fn start_update(app: AppHandle, busy: State<'_, Arc<Busy>>, hashes: bool) -> Res
         let outcome = catch_unwind(AssertUnwindSafe(|| -> Result<String, String> {
             let count = updater::update_names(&dir)?;
             let mut message = vec![format!("カード名 {count} 件を取得しました")];
+            let mut hint = false;
             if hashes {
                 let result = updater_hash::update_new_sets_in(&dir, 4000)?;
                 message.extend(update_message(&result));
+                hint = needs_update_hint(&result);
             }
-            Ok(message.join(" / "))
+            let mut text = message.join(" / ");
+            if hint {
+                text.push_str("\n\n");
+                text.push_str(updater::UPDATE_HINT);
+            }
+            Ok(text)
         }))
         .unwrap_or_else(|_| Err("更新中に予期しないエラーが発生しました".into()));
         updater::set_progress(None);
@@ -783,5 +801,27 @@ mod tests {
             update_message(&none),
             vec!["新しいカードセットはありませんでした"]
         );
+        assert!(!needs_update_hint(&none));
+    }
+
+    #[test]
+    fn all_failed_is_reported_and_asks_for_a_newer_version() {
+        let all_failed = json!({"seeded":0,"new_cards":0,"refreshed":0,"new_hashes":0,"packs":0,
+            "pack_names":[],"failed":["1","2","3"],"pack_list_failed":false,"skipped_packs":[]});
+        assert_eq!(
+            update_message(&all_failed),
+            vec!["カード画像を取得できませんでした（3 件）"]
+        );
+        assert!(needs_update_hint(&all_failed));
+    }
+
+    #[test]
+    fn update_hint_follows_failure_ratio_and_pack_list() {
+        let mostly = json!({"new_cards":1,"refreshed":0,"failed":["1","2"],"pack_list_failed":false});
+        assert!(needs_update_hint(&mostly));
+        let few = json!({"new_cards":9,"refreshed":0,"failed":["1"],"pack_list_failed":false});
+        assert!(!needs_update_hint(&few));
+        let list = json!({"new_cards":0,"refreshed":0,"failed":[],"pack_list_failed":true});
+        assert!(needs_update_hint(&list));
     }
 }
