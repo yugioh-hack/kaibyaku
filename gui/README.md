@@ -10,6 +10,7 @@ npm run tauri -- dev
 ```
 
 ```powershell
+npm test
 npm run build
 cargo test --manifest-path src-tauri/Cargo.toml --locked
 cargo clippy --manifest-path src-tauri/Cargo.toml --all-targets --locked -- -D warnings
@@ -24,3 +25,5 @@ exeは `src-tauri/target/release/mdript.exe` に生成します。現設定は�
 `npm run dev` だけでブラウザに表示した場合はモックを使います。ドラッグ＆ドロップ・実画像処理・保存・公式DB取得の検証にはTauriで起動してください。
 
 ユーザーデータは `%APPDATA%\mdript-v2` に保存します。初回起動時に、旧Python版の `%APPDATA%\mdript` から設定・カード名・登録データをコピーします（`src-tauri/src/migrate.rs`）。旧版のフォルダは変更しません。
+
+フロントエンドの登録・設定欄は `npm test` で検証します。`cargo test` はRustのテストだけを実行します。

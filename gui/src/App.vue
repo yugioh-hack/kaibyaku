@@ -298,8 +298,8 @@ async function register(cid: string) {
       rows.value[index] = fresh;
       triggerRef(rows);
       closePanel();
-      if (fresh.status === "確定") {
-        const kept = new Set(fresh.saved_paths ?? []);
+      if (fresh.saved_path) {
+        const kept = new Set(fresh.saved_paths ?? [fresh.saved_path]);
         const stale = old.filter((path) => !kept.has(path));
         if (stale.length) {
           try {
@@ -308,9 +308,8 @@ async function register(cid: string) {
             console.error(e);
           }
         }
-      } else {
-        await selectRow(index);
       }
+      if (fresh.status !== "確定") await selectRow(index);
       status.value = `${learned.message}: ${fresh.status}`;
       if (again.csv_error) await warnCsv(again.csv_error);
     }

@@ -372,7 +372,7 @@ fn learn_card(busy: State<'_, Arc<Busy>>, cid: String, source: String) -> Result
     Ok(json!({"message": message, "reprocess": reprocess}))
 }
 
-/// 登録して確定した後に、その結果が review/ か not_card/ に作った古いコピーを消す。
+/// 登録後に新しいコピーを保存できたら、review/・not_card/・detail/review/ の古いコピーを消す。
 /// 渡されたファイルだけが対象（同じ名前の別形式は、別の入力から作られたものかもしれないので触れない）。
 /// 出力先の中の review・not_card・detail/review フォルダにある webp/png だけを受け付け、1つでも違えば何も消さない。
 #[tauri::command(async)]

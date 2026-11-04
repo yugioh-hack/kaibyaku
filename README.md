@@ -73,7 +73,7 @@ Get-FileHash .\mdript.exe -Algorithm SHA256
 
 登録はファイル名の変更ではありません。正しいカードを選んでください。カード位置を決められない画像は登録できず、追加しても必ず確定するとは限りません。検索・登録の対象は判定用のデータがあるカードです。カード名検索にはカード名データが必要です。
 
-登録して処理し直した画像が「確定」になると、以前に `review/`・`not_card/`・`detail/review/` へ保存したそのコピーだけを削除します。同じ名前で別の形式のファイルがあっても、別の入力画像から作られたものは消しません。
+登録して処理し直した画像を新しく保存できると、以前に `review/`・`not_card/`・`detail/review/` へ保存したそのコピーだけを削除します。重複でスキップした場合は古いコピーを残します。同じ名前で別の形式のファイルがあっても、別の入力画像から作られたものは消しません。
 
 処理し直しと古いコピーの削除は、その結果を作ったときの出力先と設定で行います。処理のあとに画面の出力先や設定を変えても、前の結果の登録には影響しません。
 
@@ -203,6 +203,7 @@ cargo test --manifest-path gui/src-tauri/Cargo.toml --locked
 cargo clippy --manifest-path gui/src-tauri/Cargo.toml --all-targets --locked -- -D warnings
 cargo fmt --manifest-path gui/src-tauri/Cargo.toml --all --check
 cd gui
+npm test
 npm run build
 ```
 

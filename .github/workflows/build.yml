@@ -62,6 +62,7 @@ jobs:
           workspaces: gui/src-tauri
       - run: rustup component add rustfmt clippy
       - run: npm ci
+      - run: npm test
       # vue-tsc による型検査と本番ビルド。Tauri 側のテストは dist/ が必要なので先に行う
       - run: npm run build
       - run: cargo fmt --manifest-path src-tauri/Cargo.toml --all --check
