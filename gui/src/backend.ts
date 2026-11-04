@@ -67,9 +67,13 @@ export async function message(text: string, kind: "info" | "warning" | "error" =
   await tauriMessage(text, { title: TITLE, kind });
 }
 
-export async function ask(text: string): Promise<boolean> {
-  if (mock) return mock.ask(text);
-  return tauriAsk(text, { title: TITLE, kind: "info" });
+/** はい／いいえの確認。ボタンの文言を変えたいときは okLabel・cancelLabel を渡す。 */
+export async function ask(
+  text: string,
+  options: { kind?: "info" | "warning" | "error"; okLabel?: string; cancelLabel?: string } = {},
+): Promise<boolean> {
+  if (mock) return mock.ask(text, options);
+  return tauriAsk(text, { title: TITLE, kind: options.kind ?? "info", okLabel: options.okLabel, cancelLabel: options.cancelLabel });
 }
 
 /** 画像ファイルの表示用URL。ブラウザー（モック）では代わりの絵を返す。 */

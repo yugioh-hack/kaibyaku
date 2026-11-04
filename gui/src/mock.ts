@@ -39,8 +39,8 @@ export async function pickFolder() {
 export async function message(text: string, kind: string) {
   console.info(`[mock message:${kind}]`, text);
 }
-export async function ask(text: string) {
-  console.info("[mock ask]", text);
+export async function ask(text: string, options: object = {}) {
+  console.info("[mock ask]", text, options);
   return new URLSearchParams(location.search).get("ask") === "yes";
 }
 
@@ -128,6 +128,14 @@ function startUpdate(hashes: boolean) {
     busy = false;
     finish = null;
     if (cancelled) return emit("update-done", { message: "中止しました" });
+    // ?updatefail=1 で、最新版の確認を案内する失敗の表示を確かめる
+    if (new URLSearchParams(location.search).get("updatefail")) {
+      return emit("update-done", {
+        error:
+          "カード名の一覧を読み取れませんでした（100 行中 0 行）。公式サイトの作りが変わった可能性があります。最新版の開闢が出ていないか、ダウンロードページを確認してください。",
+        download: true,
+      });
+    }
     data.names = 12345;
     data.english_names = 12000;
     data.names_fetched = true;
@@ -236,6 +244,9 @@ export async function invoke(command: string, args: Record<string, unknown> = {}
       return;
     case "open_folder":
       console.info("[mock open_folder]", args.path);
+      return;
+    case "open_download_page":
+      console.info("[mock open_download_page]");
       return;
   }
   throw `unknown command: ${command}`;

@@ -111,6 +111,8 @@ export interface Reprocessed {
 export interface UpdateDone {
   message?: string;
   error?: string;
+  /** 最新版の確認を案内するとき true。「ダウンロードページを開く」ボタンを出す */
+  download?: boolean;
 }
 
 export interface CardRef {

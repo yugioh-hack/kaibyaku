@@ -19,7 +19,9 @@ const MAX_RESPONSE: u64 = 32 * 1024 * 1024;
 const INTERVAL: Duration = Duration::from_millis(400);
 const PAGE_SIZE: usize = 2000;
 /// 取得に失敗したときに添える案内。公式サイトの作りが変わると古い版は取得できなくなるため、最新版の確認を促す。
-pub const UPDATE_HINT: &str = "時間をおいても直らない場合は、公式サイトの作りが変わった可能性があります。最新版の開闢が出ていないか、リリースページを確認してください。";
+pub const UPDATE_HINT: &str = "時間をおいても直らない場合は、公式サイトの作りが変わった可能性があります。最新版の開闢が出ていないか、ダウンロードページを確認してください。";
+/// 画面は、エラーや結果にこの文が含まれるとき「ダウンロードページを開く」ボタンを出す。
+pub const LATEST_HINT: &str = "最新版の開闢が出ていないか、ダウンロードページを確認してください。";
 static CANCELLED: AtomicBool = AtomicBool::new(false);
 static CANCEL_HANDLER: OnceLock<Result<(), String>> = OnceLock::new();
 
@@ -251,7 +253,7 @@ fn fetch_name_list(fetch: &mut impl Fetch, locale: &str) -> Result<Vec<NameRow>,
         let blocks = pattern("row").split(&html).count().saturating_sub(1);
         if blocks > 0 && rows.len() * 2 < blocks {
             return Err(format!(
-                "カード名の一覧を読み取れませんでした（{blocks} 行中 {} 行）。公式サイトの作りが変わった可能性があります。最新版の開闢が出ていないか、リリースページを確認してください。",
+                "カード名の一覧を読み取れませんでした（{blocks} 行中 {} 行）。公式サイトの作りが変わった可能性があります。{LATEST_HINT}",
                 rows.len()
             ));
         }
@@ -411,7 +413,12 @@ mod tests {
     fn empty_page_asks_to_check_for_a_newer_version() {
         let error = names_error("<html>maintenance</html>");
         assert!(error.contains("メンテナンス"));
-        assert!(error.contains("リリースページ"));
+        assert!(error.contains(LATEST_HINT));
+    }
+
+    #[test]
+    fn update_hint_contains_the_marker_the_screen_looks_for() {
+        assert!(UPDATE_HINT.contains(LATEST_HINT));
     }
 
     #[test]
@@ -422,6 +429,7 @@ mod tests {
         let error = names_error(changed);
         assert!(error.contains("2 行中 0 行"));
         assert!(error.contains("作りが変わった"));
+        assert!(error.contains(LATEST_HINT));
         // 半分だけ読めた一覧も受け付けない
         let half = r#"<div class="t_row"><input class="cid" value="1"><span class="card_name">A</span></div>
 <div class="t_row"><input class="cid" value="2"><span class="name">B</span></div>

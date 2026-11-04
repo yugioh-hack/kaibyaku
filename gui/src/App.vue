@@ -504,13 +504,25 @@ async function onUpdateDone(d: UpdateDone) {
   updateOpen.value = false;
   await refreshData();
   if (closing.value) return;
-  if (d.error) {
-    status.value = "エラーが発生しました";
-    await message(d.error, "error");
-  } else {
-    status.value = d.message ?? "";
-    await message(d.message ?? "", "info");
+  if (d.error) status.value = "エラーが発生しました";
+  else status.value = d.message ?? "";
+  const text = d.error ?? d.message ?? "";
+  if (d.download) {
+    // 最新版の確認を案内するときだけ、ダウンロードページを開くボタンを出す
+    const open = await ask(text, {
+      kind: d.error ? "error" : "warning",
+      okLabel: "ダウンロードページを開く",
+      cancelLabel: "閉じる",
+    });
+    if (!open) return;
+    try {
+      await invoke("open_download_page");
+    } catch (e) {
+      await message(String(e), "warning");
+    }
+    return;
   }
+  await message(text, d.error ? "error" : "info");
 }
 
 // 旧アプリのデータを取り込んだとき（初回だけ）に知らせる

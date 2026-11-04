@@ -22,6 +22,8 @@ use tauri::{AppHandle, Emitter, Manager, State};
 const USER_DIR_NAME: &str = "mdript-v2";
 const LEGACY_DIR_NAME: &str = "mdript";
 const CANCELLED: &str = "更新を中断しました";
+/// 最新版の案内で開くページ。ダウンロードページができたら、ここだけ差し替える。
+const DOWNLOAD_URL: &str = "https://github.com/yugioh-hack/kaibyaku/releases/latest";
 
 #[derive(Default)]
 struct BusyState {
@@ -489,7 +491,7 @@ fn start_update(app: AppHandle, busy: State<'_, Arc<Busy>>, hashes: bool) -> Res
         updater::set_progress(Some(Box::new(move |message: &str| {
             let _ = progress_app.emit("update-progress", message);
         })));
-        let outcome = catch_unwind(AssertUnwindSafe(|| -> Result<String, String> {
+        let outcome = catch_unwind(AssertUnwindSafe(|| -> Result<(String, bool), String> {
             let count = updater::update_names(&dir)?;
             let mut message = vec![format!("カード名 {count} 件を取得しました")];
             let mut hint = false;
@@ -503,14 +505,18 @@ fn start_update(app: AppHandle, busy: State<'_, Arc<Busy>>, hashes: bool) -> Res
                 text.push_str("\n\n");
                 text.push_str(updater::UPDATE_HINT);
             }
-            Ok(text)
+            Ok((text, hint))
         }))
         .unwrap_or_else(|_| Err("更新中に予期しないエラーが発生しました".into()));
         updater::set_progress(None);
+        // download: 画面が「ダウンロードページを開く」ボタンを出すか
         let payload = match outcome {
-            Ok(message) => json!({"message": message}),
+            Ok((message, download)) => json!({"message": message, "download": download}),
             Err(error) if error == CANCELLED => json!({"message": "中止しました"}),
-            Err(error) => json!({"error": error}),
+            Err(error) => {
+                let download = error.contains(updater::LATEST_HINT);
+                json!({"error": error, "download": download})
+            }
         };
         let _ = app.emit("update-done", payload);
     });
@@ -547,6 +553,16 @@ fn open_folder(path: String) -> Result<(), String> {
         .map_err(|e| format!("出力先を開けませんでした。\n{e}"))
 }
 
+/// 最新版の案内のボタンから呼ぶ。開くのは DOWNLOAD_URL だけで、画面からURLは渡せない。
+#[tauri::command]
+fn open_download_page() -> Result<(), String> {
+    std::process::Command::new("explorer.exe")
+        .arg(DOWNLOAD_URL)
+        .spawn()
+        .map(|_| ())
+        .map_err(|e| format!("ダウンロードページを開けませんでした。\n{e}"))
+}
+
 pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
@@ -567,6 +583,7 @@ pub fn run() {
             stop,
             data_summary,
             open_folder,
+            open_download_page,
             identify_one,
             describe_cards,
             search_cards,
@@ -802,6 +819,13 @@ mod tests {
             vec!["新しいカードセットはありませんでした"]
         );
         assert!(!needs_update_hint(&none));
+    }
+
+    #[test]
+    fn download_url_is_a_plain_https_address() {
+        // explorer.exe に渡すので、https の素直なアドレスだけを許す
+        assert!(DOWNLOAD_URL.starts_with("https://"));
+        assert!(!DOWNLOAD_URL.contains(|c: char| c.is_whitespace() || "\"'&^%<>|".contains(c)));
     }
 
     #[test]
