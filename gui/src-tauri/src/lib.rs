@@ -586,6 +586,23 @@ mod tests {
     use super::*;
 
     #[test]
+    fn data_summary_returns_a_timestamp_string_or_an_empty_string() {
+        let root = std::env::temp_dir().join(format!("mdript-gui-summary-{}", std::process::id()));
+        assert_eq!(learn::data_summary(&root)["names_fetched"], "");
+        fs::create_dir_all(&root).unwrap();
+        fs::write(
+            root.join("card_names.json"),
+            r#"{"meta":{"fetched":"2026-11-04T09:00:00"},"cards":{}}"#,
+        )
+        .unwrap();
+        assert_eq!(
+            learn::data_summary(&root)["names_fetched"],
+            "2026-11-04T09:00:00"
+        );
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
     fn config_keeps_only_known_typed_keys() {
         let dir = std::env::temp_dir().join(format!("mdript-gui-config-{}", std::process::id()));
         fs::create_dir_all(&dir).unwrap();

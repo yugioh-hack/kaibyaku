@@ -5,7 +5,7 @@ export interface DataSummary {
   hashes: number;
   names: number;
   english_names: number;
-  names_fetched: boolean;
+  names_fetched: string;
 }
 
 export interface Config {

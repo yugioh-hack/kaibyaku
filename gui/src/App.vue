@@ -57,7 +57,7 @@ const detail = ref("detail/ に分ける");
 let config: Config = {};
 
 // ---- 画面の状態 ----
-const data = ref<DataSummary>({ cards: 0, hashes: 0, names: 0, english_names: 0, names_fetched: false });
+const data = ref<DataSummary>({ cards: 0, hashes: 0, names: 0, english_names: 0, names_fetched: "" });
 const busy = ref<"identify" | "update" | null>(null);
 const updateOpen = ref(false);
 const updateProgress = ref("");

@@ -6,7 +6,7 @@ const listeners = new Map<string, Set<Handler>>();
 let busy = false;
 let timers: number[] = [];
 let finish: ((cancelled: boolean) => void) | null = null;
-const data = { cards: 14000, hashes: 15230, names: 0, english_names: 0, names_fetched: false };
+const data = { cards: 14000, hashes: 15230, names: 0, english_names: 0, names_fetched: "" };
 let config: Record<string, unknown> = {};
 
 function emit(event: string, payload: unknown) {
@@ -138,7 +138,7 @@ function startUpdate(hashes: boolean) {
     }
     data.names = 12345;
     data.english_names = 12000;
-    data.names_fetched = true;
+    data.names_fetched = new Date().toISOString();
     if (hashes) data.hashes += 48;
     emit("update-done", {
       message: hashes ? "カード名 12345 件を取得しました / 新しいカードセットはありませんでした" : "カード名 12345 件を取得しました",
