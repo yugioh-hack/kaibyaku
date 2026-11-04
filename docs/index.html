@@ -1,0 +1,129 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>開闢 — 撮りためたスクショをカードにしよう</title>
+<meta name="description" content="マスターデュエルのスクリーンショットからカード画像を切り抜いて、カード名で保存する Windows 向けの無料ツール。">
+<link rel="icon" href="images/icon.png">
+<style>
+  :root {
+    --bg: #f4f6f9;
+    --fg: #14202e;
+    --muted: #5a6877;
+    --accent: #072b52;
+    --accent-fg: #ffffff;
+    --card: #ffffff;
+    --line: #dde3ea;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #0e141b;
+      --fg: #e8edf3;
+      --muted: #9aa7b5;
+      --accent: #3b8be0;
+      --accent-fg: #ffffff;
+      --card: #17202a;
+      --line: #263341;
+    }
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--fg);
+    font-family: "Yu Gothic UI", "Hiragino Sans", "Meiryo", system-ui, sans-serif;
+    line-height: 1.7;
+  }
+  main { max-width: 760px; margin: 0 auto; padding: 56px 16px 64px; }
+  header { text-align: center; }
+  header img { width: 96px; height: 96px; border-radius: 22px; }
+  h1 {
+    margin: 16px 0 4px;
+    font-family: "Yu Mincho", "Hiragino Mincho ProN", "MS PMincho", serif;
+    font-size: 3rem;
+    letter-spacing: .15em;
+  }
+  .catch { margin: 0; color: var(--muted); font-size: 1.1rem; }
+  .download { text-align: center; margin: 36px 0 56px; }
+  .button {
+    display: inline-block;
+    padding: 16px 40px;
+    border-radius: 12px;
+    background: var(--accent);
+    color: var(--accent-fg);
+    font-size: 1.25rem;
+    font-weight: 700;
+    text-decoration: none;
+  }
+  .button:hover { filter: brightness(1.12); }
+  .button:focus-visible { outline: 3px solid var(--accent); outline-offset: 3px; }
+  .meta { margin: 10px 0 0; color: var(--muted); font-size: .9rem; }
+  .meta a { color: inherit; }
+  section { margin-top: 40px; }
+  h2 { margin: 0 0 8px; font-size: 1.2rem; }
+  section p { margin: 0 0 16px; }
+  figure { margin: 0; }
+  figure img {
+    display: block;
+    width: 100%;
+    height: auto;
+    border: 1px solid var(--line);
+    border-radius: 10px;
+    background: var(--card);
+  }
+  footer { margin-top: 56px; text-align: center; color: var(--muted); font-size: .85rem; }
+  footer a { color: inherit; }
+  @media (max-width: 480px) {
+    h1 { font-size: 2.4rem; }
+    .button { width: 100%; padding: 16px 0; }
+  }
+</style>
+</head>
+<body>
+<main>
+  <header>
+    <img src="images/icon.png" alt="">
+    <h1>開闢</h1>
+    <p class="catch">撮りためたスクショをカードにしよう</p>
+  </header>
+
+  <div class="download">
+    <a id="dl" class="button" href="https://github.com/yugioh-hack/kaibyaku/releases/latest">ダウンロード（Windows）</a>
+    <p class="meta"><span id="ver"></span>無料 / zipを展開して mdript.exe を起動</p>
+  </div>
+
+  <section>
+    <h2>カード1枚だけを切り抜く</h2>
+    <p>マスターデュエルの拡大画面を撮るだけで、カードのイラストを自動で切り抜き、カード名を付けて保存します。</p>
+    <figure><img src="images/zoom.png" alt="" onerror="this.closest('figure').hidden = true"></figure>
+  </section>
+
+  <section>
+    <h2>詳細画面にも対応</h2>
+    <p>デッキ編集などで開くカード詳細画面からも切り抜けます。たくさん撮ったスクショは、フォルダごとドロップしてまとめて処理できます。</p>
+    <figure><img src="images/detail.png" alt="" onerror="this.closest('figure').hidden = true"></figure>
+  </section>
+
+  <footer>
+    <a href="https://github.com/yugioh-hack/kaibyaku">GitHub</a>
+    ・株式会社KONAMIおよび遊戯王公式とは関係ありません
+  </footer>
+</main>
+
+<script>
+  // 最新リリースの zip を探してボタンのリンクを差し替える。失敗したときはリリースページへ行く。
+  (async () => {
+    try {
+      const res = await fetch("https://api.github.com/repos/yugioh-hack/kaibyaku/releases/latest");
+      if (!res.ok) return;
+      const rel = await res.json();
+      const asset = (rel.assets || []).find((a) => /windows.*\.zip$/i.test(a.name));
+      if (!asset) return;
+      document.getElementById("dl").href = asset.browser_download_url;
+      document.getElementById("ver").textContent = rel.tag_name + " / ";
+    } catch (_) {}
+  })();
+</script>
+</body>
+</html>
