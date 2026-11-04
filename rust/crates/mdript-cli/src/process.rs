@@ -599,14 +599,13 @@ impl Prepared {
         Self { result, save: None }
     }
 }
-fn prepare(path: &Path, catalog: &Catalog, o: &Options) -> Result<Prepared, String> {
+fn prepare(path: &Path, im: RgbImage, catalog: &Catalog, o: &Options) -> Result<Prepared, String> {
     #[cfg(test)]
     if std::env::var_os("MDRIPT_TEST_PANIC_PREPARE")
         .is_some_and(|name| path.file_name() == Some(name.as_os_str()))
     {
         panic!("injected prepare panic");
     }
-    let im = load_image(path)?;
     let mut result = json!({"source":path,"size":[im.width(),im.height()],"status":"カードなし","card_id":"","name":"","distance":999,"margin":0,"saved_path":"","note":"","english":false,"screen":null,"box":null,"origin":null,"hash":null,"ranked":[],"stroke_ratio":null});
     let stem = path.file_stem().unwrap_or_default().to_string_lossy();
     let Some(found) = identify(&im, catalog, &o.resolution) else {
@@ -854,6 +853,10 @@ impl Sequencer {
     }
 }
 fn error_result(path: &Path, error: String) -> Value {
+    failure_result(path, format!("画像を処理できませんでした（{error}）"))
+}
+
+fn failure_result(path: &Path, error: String) -> Value {
     json!({"source":path,"status":"エラー","card_id":"","name":"","distance":999,"margin":0,"saved_path":"","note":error,"english":false})
 }
 pub fn run(args: Vec<OsString>) -> Result<(), String> {
@@ -927,8 +930,12 @@ pub fn identify_files(
                         lock_recover(slots)[turn] = Some(Value::Null);
                         continue;
                     }
-                    let prepared = catch_unwind(AssertUnwindSafe(|| prepare(path, catalog, o)))
-                        .unwrap_or_else(|payload| Err(panic_message(payload)));
+                    let prepared = catch_unwind(AssertUnwindSafe(|| match load_image(path) {
+                        Ok(im) => prepare(path, im, catalog, o),
+                        // 読み込みの説明は復号側で付ける。保存・判定の失敗とは別の経路にする。
+                        Err(error) => Ok(Prepared::complete(failure_result(path, error))),
+                    }))
+                    .unwrap_or_else(|payload| Err(panic_message(payload)));
                     let result =
                         catch_unwind(AssertUnwindSafe(|| sequencer.finish(turn, prepared, o)))
                             .unwrap_or_else(|payload| Err(panic_message(payload)))
@@ -1415,6 +1422,35 @@ mod tests {
     }
 
     #[test]
+    fn error_wrapping_depends_on_the_stage_not_the_wording() {
+        let path = Path::new("image.png");
+        for wording in ["画像を読めません", "読み込みに失敗しました", "別の文言"]
+        {
+            assert_eq!(failure_result(path, wording.into())["note"], wording);
+            assert_eq!(
+                error_result(path, wording.into())["note"],
+                format!("画像を処理できませんでした（{wording}）")
+            );
+        }
+    }
+
+    #[test]
+    fn unreadable_image_result_has_a_short_japanese_explanation() {
+        let temp = Temp::new();
+        let source = temp.0.join("broken.png");
+        fs::write(&source, b"broken").unwrap();
+        let summary = run_one(&options(&temp), source);
+        assert_eq!(summary["error"], 1);
+        assert!(
+            summary["results"][0]["note"]
+                .as_str()
+                .unwrap()
+                .starts_with("画像を読み込めませんでした（")
+        );
+        assert_eq!(summary["results"][0]["saved_path"], "");
+    }
+
+    #[test]
     fn image_without_card_frame_is_not_copied() {
         let temp = Temp::new();
         let input = plain_input(&temp);
@@ -1678,7 +1714,7 @@ mod tests {
                 (found.screen == Screen::Detail && found.distance > 36).then_some((catalog, found))
             })
             .expect("詳細画面として検出される不一致画像を用意する");
-        let prepared = prepare(&source, &catalog, &o).unwrap();
+        let prepared = prepare(&source, im.clone(), &catalog, &o).unwrap();
         let crop_size = found.card(&im).dimensions();
         let result = Sequencer::default().finish(0, Ok(prepared), &o).unwrap();
         let saved = Path::new(result["saved_path"].as_str().unwrap());
