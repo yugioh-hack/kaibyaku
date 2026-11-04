@@ -347,7 +347,6 @@ function identifyArgs(out: string): ProcessArgs {
     split: SPLIT[split.value] ?? "none",
     detail: DETAIL[detail.value] ?? "folder",
     // カードの位置は自動で見つける（解像度を指定しても、見つけられる範囲は広がらない）
-    resolution: "auto",
   };
 }
 

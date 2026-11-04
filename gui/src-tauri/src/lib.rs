@@ -102,16 +102,9 @@ fn default_output() -> String {
         .into_owned()
 }
 
-/// Python 版 catalog.load_config と同じく、既知の項目を正しい型のときだけ残す。
+/// GUIで使う既知の項目を、正しい型のときだけ残す。
 fn filter_config(value: &Value) -> Map<String, Value> {
-    const STRINGS: [&str; 6] = [
-        "output_dir",
-        "resolution",
-        "save_format",
-        "english",
-        "split",
-        "detail",
-    ];
+    const STRINGS: [&str; 5] = ["output_dir", "save_format", "english", "split", "detail"];
     const BOOLS: [&str; 7] = [
         "rounded",
         "recursive",
@@ -204,8 +197,6 @@ struct IdentifyArgs {
     english: String,
     split: String,
     detail: String,
-    /// "auto" または "1920x1080" のような元の解像度
-    resolution: String,
 }
 
 fn options(args: &IdentifyArgs, user_data: PathBuf) -> Result<process::Options, String> {
@@ -226,14 +217,6 @@ fn options(args: &IdentifyArgs, user_data: PathBuf) -> Result<process::Options, 
     o.english = args.english.clone();
     o.split = args.split.clone();
     o.detail = args.detail.clone();
-    o.resolution = match args.resolution.split_once('x') {
-        Some((w, h)) => {
-            let w: u32 = w.parse().map_err(|_| "解像度の値が正しくありません")?;
-            let h: u32 = h.parse().map_err(|_| "解像度の値が正しくありません")?;
-            mdript_core::layout::Resolution::Original(w, h)
-        }
-        None => mdript_core::layout::Resolution::Auto,
-    };
     if o.output.as_os_str().is_empty() {
         return Err("出力先フォルダを指定してください。".into());
     }
@@ -676,9 +659,35 @@ mod tests {
     }
 
     #[test]
+    fn legacy_resolution_is_ignored_and_gui_always_uses_auto() {
+        let root =
+            std::env::temp_dir().join(format!("mdript-gui-resolution-{}", std::process::id()));
+        let value = json!({"output":root.join("out"),"save_format":"webp","rounded":true,
+            "recursive":true,"skip_duplicate":true,"save_review":true,"save_not_card":true,
+            "english":"off","split":"none","detail":"suffix","resolution":"invalid-old-value"});
+        let args: IdentifyArgs = serde_json::from_value(value).unwrap();
+        assert_eq!(
+            options(&args, root.join("user")).unwrap().resolution,
+            mdript_core::layout::Resolution::Auto
+        );
+        fs::create_dir_all(&root).unwrap();
+        fs::write(
+            root.join("config.json"),
+            r#"{"resolution":"1920x1080","rounded":false,"detail":"suffix"}"#,
+        )
+        .unwrap();
+        let config = read_config(&root);
+        assert!(!config.contains_key("resolution"));
+        assert_eq!(config["detail"], "suffix");
+        assert_eq!(options(&args, root.join("user")).unwrap().detail, "suffix");
+        assert_eq!(config["rounded"], false);
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
     fn identify_args_map_to_cli_options() {
         let root = std::env::temp_dir().join(format!("mdript-gui-args-{}", std::process::id()));
-        let args = |output: &str, resolution: &str, format: &str| IdentifyArgs {
+        let args = |output: &str, format: &str| IdentifyArgs {
             output: output.into(),
             save_format: format.into(),
             rounded: false,
@@ -689,24 +698,19 @@ mod tests {
             english: "ja".into(),
             split: "both".into(),
             detail: "suffix".into(),
-            resolution: resolution.into(),
         };
         let out = root.join("out").to_string_lossy().into_owned();
-        let o = options(&args(&out, "1920x1080", "png"), root.join("user")).unwrap();
+        let o = options(&args(&out, "png"), root.join("user")).unwrap();
         assert_eq!(o.format, "png");
         assert!(!o.rounded && !o.recursive && !o.duplicates && !o.review && o.not_card);
         assert_eq!((o.english.as_str(), o.split.as_str()), ("ja", "both"));
         assert_eq!(o.detail, "suffix");
-        assert_eq!(
-            o.resolution,
-            mdript_core::layout::Resolution::Original(1920, 1080)
-        );
-        let auto = options(&args(&out, "auto", "webp"), root.join("user")).unwrap();
+        assert_eq!(o.resolution, mdript_core::layout::Resolution::Auto);
+        let auto = options(&args(&out, "webp"), root.join("user")).unwrap();
         assert_eq!(auto.resolution, mdript_core::layout::Resolution::Auto);
-        assert!(options(&args("", "auto", "webp"), root.join("user")).is_err());
-        assert!(options(&args("relative", "auto", "webp"), root.join("user")).is_err());
-        assert!(options(&args(&out, "auto", "gif"), root.join("user")).is_err());
-        assert!(options(&args(&out, "axb", "webp"), root.join("user")).is_err());
+        assert!(options(&args("", "webp"), root.join("user")).is_err());
+        assert!(options(&args("relative", "webp"), root.join("user")).is_err());
+        assert!(options(&args(&out, "gif"), root.join("user")).is_err());
     }
 
     fn remove(paths: &[PathBuf], out: &str) -> Result<(), String> {

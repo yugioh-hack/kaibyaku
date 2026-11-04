@@ -10,7 +10,6 @@ export interface DataSummary {
 
 export interface Config {
   output_dir?: string;
-  resolution?: string;
   save_format?: string;
   english?: string;
   split?: string;
@@ -52,7 +51,6 @@ export interface ProcessArgs {
   english: string;
   split: string;
   detail: string;
-  resolution: string;
 }
 
 /** ログ（log.csv）を書けなかったこと。画像の処理結果とは別に知らせる。 */
