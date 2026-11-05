@@ -31,7 +31,10 @@ fn scope_groups_safe_folders_and_keeps_unvisited_subfolders_private() {
     fs::write(&saved, b"x").unwrap();
     allow_output_images(&scope, &o.output, Some(&root.join("home"))).unwrap();
     assert!(scope.is_allowed(&saved));
-    assert!(scope.is_allowed(root.join("output/other.webp")));
+    // 画面が読むのは保存済みのファイルだけ。実在させて、短い名前の一時フォルダでも正式な名前で照合させる
+    let other = root.join("output/other.webp");
+    fs::write(&other, b"x").unwrap();
+    assert!(scope.is_allowed(&other));
     fs::remove_dir_all(root).unwrap();
 }
 

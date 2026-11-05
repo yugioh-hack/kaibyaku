@@ -54,10 +54,12 @@ fn default_csv_is_written_but_no_csv_and_dry_run_leave_no_log() {
     ));
     assert_eq!(csv.matches("\r\n").count(), 2);
     assert!(!csv.contains(r"\\?\"));
+    // 一時フォルダが短い名前（RUNNER~1 など）で渡されても比べられるよう、両方を正式な名前にそろえる
     assert!(
         csv.contains(
-            &Path::new(saved_path)
-                .strip_prefix(&normal)
+            &fs::canonicalize(saved_path)
+                .unwrap()
+                .strip_prefix(fs::canonicalize(&normal).unwrap())
                 .unwrap()
                 .to_string_lossy()
                 .replace('\\', "/")
